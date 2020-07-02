@@ -18,6 +18,7 @@ namespace leveldb {
 Comparator::~Comparator() = default;
 
 namespace {
+// zhou: compare bit by bit
 class BytewiseComparatorImpl : public Comparator {
  public:
   BytewiseComparatorImpl() = default;

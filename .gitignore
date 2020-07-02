@@ -2,6 +2,8 @@
 *.sw*
 .vscode
 .DS_Store
+cscope.files
+cscope.out
 
 # Build directory.
 build/

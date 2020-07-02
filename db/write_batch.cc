@@ -97,22 +97,31 @@ void WriteBatchInternal::SetSequence(WriteBatch* b, SequenceNumber seq) {
 
 void WriteBatch::Put(const Slice& key, const Slice& value) {
   WriteBatchInternal::SetCount(this, WriteBatchInternal::Count(this) + 1);
+  // zhou: encode op code - add
   rep_.push_back(static_cast<char>(kTypeValue));
+  // zhou: encode key and value
   PutLengthPrefixedSlice(&rep_, key);
   PutLengthPrefixedSlice(&rep_, value);
 }
 
 void WriteBatch::Delete(const Slice& key) {
   WriteBatchInternal::SetCount(this, WriteBatchInternal::Count(this) + 1);
+  // zhou: encode op code - delete
   rep_.push_back(static_cast<char>(kTypeDeletion));
+  // zhou: encode key
   PutLengthPrefixedSlice(&rep_, key);
 }
 
 void WriteBatch::Append(const WriteBatch& source) {
+  // zhou: merge two write batch
   WriteBatchInternal::Append(this, &source);
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
+// zhou: private namespace
 namespace {
+
 class MemTableInserter : public WriteBatch::Handler {
  public:
   SequenceNumber sequence_;
@@ -127,8 +136,12 @@ class MemTableInserter : public WriteBatch::Handler {
     sequence_++;
   }
 };
+
 }  // namespace
 
+// zhou: defined in "write_batch_internal.h".
+//       "WriteBatchInternal provides static methods for manipulating a
+//        WriteBatch that we don't want in the public WriteBatch interface."
 Status WriteBatchInternal::InsertInto(const WriteBatch* b, MemTable* memtable) {
   MemTableInserter inserter;
   inserter.sequence_ = WriteBatchInternal::Sequence(b);

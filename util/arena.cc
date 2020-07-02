@@ -17,6 +17,8 @@ Arena::~Arena() {
   }
 }
 
+// zhou: once more than 4K/4==1KB, allocate from system directly.
+//       Otherwise, allocate 1 4K page firstly, and share small request within it.
 char* Arena::AllocateFallback(size_t bytes) {
   if (bytes > kBlockSize / 4) {
     // Object is more than a quarter of our block size.  Allocate it separately
@@ -30,16 +32,19 @@ char* Arena::AllocateFallback(size_t bytes) {
   alloc_bytes_remaining_ = kBlockSize;
 
   char* result = alloc_ptr_;
+  // zhou: update remaining memory
   alloc_ptr_ += bytes;
   alloc_bytes_remaining_ -= bytes;
   return result;
 }
 
+// zhou: align with type itself.
 char* Arena::AllocateAligned(size_t bytes) {
   const int align = (sizeof(void*) > 8) ? sizeof(void*) : 8;
   static_assert((align & (align - 1)) == 0,
                 "Pointer size should be a power of 2");
   size_t current_mod = reinterpret_cast<uintptr_t>(alloc_ptr_) & (align - 1);
+  // zhou: how many byte need to skip due to keep align.
   size_t slop = (current_mod == 0 ? 0 : align - current_mod);
   size_t needed = bytes + slop;
   char* result;
@@ -55,6 +60,7 @@ char* Arena::AllocateAligned(size_t bytes) {
   return result;
 }
 
+// zhou: allocate new memory block
 char* Arena::AllocateNewBlock(size_t block_bytes) {
   char* result = new char[block_bytes];
   blocks_.push_back(result);

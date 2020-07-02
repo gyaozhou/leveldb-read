@@ -39,6 +39,8 @@ namespace leveldb {
 
 const int kNumNonTableCacheFiles = 10;
 
+// zhou: like task context
+
 // Information kept for every waiting writer
 struct DBImpl::Writer {
   explicit Writer(port::Mutex* mu)
@@ -48,6 +50,8 @@ struct DBImpl::Writer {
   WriteBatch* batch;
   bool sync;
   bool done;
+
+  // zhou: std::condition_variable
   port::CondVar cv;
 };
 
@@ -123,6 +127,11 @@ static int TableCacheSize(const Options& sanitized_options) {
   return sanitized_options.max_open_files - kNumNonTableCacheFiles;
 }
 
+
+////////////////////////////////////////////////////////////////////////////////
+// zhou: class DBImpl
+
+// zhou: allocate object and set accroding to options, will not related with a file.
 DBImpl::DBImpl(const Options& raw_options, const std::string& dbname)
     : env_(raw_options.env),
       internal_comparator_(raw_options.comparator),
@@ -178,6 +187,7 @@ DBImpl::~DBImpl() {
   }
 }
 
+// zhou: new files exist, create brand new db.
 Status DBImpl::NewDB() {
   VersionEdit new_db;
   new_db.SetComparatorName(user_comparator()->Name());
@@ -219,6 +229,7 @@ void DBImpl::MaybeIgnoreError(Status* s) const {
   }
 }
 
+// zhou: README,
 void DBImpl::RemoveObsoleteFiles() {
   mutex_.AssertHeld();
 
@@ -286,6 +297,7 @@ void DBImpl::RemoveObsoleteFiles() {
   mutex_.Lock();
 }
 
+// zhou: recover db from files if exists.
 Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   mutex_.AssertHeld();
 
@@ -1183,32 +1195,45 @@ void DBImpl::ReleaseSnapshot(const Snapshot* snapshot) {
   snapshots_.Delete(static_cast<const SnapshotImpl*>(snapshot));
 }
 
+// zhou: add single KV record
+
 // Convenience methods
 Status DBImpl::Put(const WriteOptions& o, const Slice& key, const Slice& val) {
   return DB::Put(o, key, val);
 }
 
+// zhou: delete single KV record
 Status DBImpl::Delete(const WriteOptions& options, const Slice& key) {
   return DB::Delete(options, key);
 }
 
+// zhou: README, update a batch of recored (could mix add and delete)
+//       "updates", could be set nullptr, for trigger compaction.
 Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
+  // zhou: struct DBImpl::Writer{}
   Writer w(&mutex_);
   w.batch = updates;
   w.sync = options.sync;
   w.done = false;
 
   MutexLock l(&mutex_);
+
+  // zhou: due to there are may be multiply threads invoke DB::Write().
+  //       Here perform synchronization to serialize concurrent write.
   writers_.push_back(&w);
+  // zhou: wait for all previous DBImpl::Writer completed in other write thread.
   while (!w.done && &w != writers_.front()) {
-    w.cv.Wait();
+      // zhou: "mutex_" released
+   w.cv.Wait();
   }
+  // zhou: when will be here?
   if (w.done) {
     return w.status;
   }
 
   // May temporarily unlock and wait.
   Status status = MakeRoomForWrite(updates == nullptr);
+
   uint64_t last_sequence = versions_->LastSequence();
   Writer* last_writer = &w;
   if (status.ok() && updates != nullptr) {  // nullptr batch is for compactions
@@ -1315,20 +1340,36 @@ WriteBatch* DBImpl::BuildBatchGroup(Writer** last_writer) {
   return result;
 }
 
+// zhou: check so many precondtions, may block due to IO throttling.
+//       Trigger minor compaction if need.
+//       "force", compact even if there is room?
+
 // REQUIRES: mutex_ is held
 // REQUIRES: this thread is currently at the front of the writer queue
 Status DBImpl::MakeRoomForWrite(bool force) {
+  // zhou: test in LLVM.
   mutex_.AssertHeld();
+
   assert(!writers_.empty());
+
+  // zhou: true in normal path, false when explict expand room without user record.
   bool allow_delay = !force;
   Status s;
+
   while (true) {
+
     if (!bg_error_.ok()) {
       // Yield previous error
       s = bg_error_;
       break;
+
     } else if (allow_delay && versions_->NumLevelFiles(0) >=
                                   config::kL0_SlowdownWritesTrigger) {
+      // zhou: level 0 sst >= 8, compaction thread is not fast enough.
+      //       kL0_SlowdownWritesTrigger==8, is soft limit.
+      //       Release mutex when sleeping, because compaction thread could
+      //       update meta data. Other writer will not take mutex.
+
       // We are getting close to hitting a hard limit on the number of
       // L0 files.  Rather than delaying a single write by several
       // seconds when we hit the hard limit, start delaying each
@@ -1336,25 +1377,46 @@ Status DBImpl::MakeRoomForWrite(bool force) {
       // this delay hands over some CPU to the compaction thread in
       // case it is sharing the same core as the writer.
       mutex_.Unlock();
+
+      // zhou: like IO throtting, sleep 1ms.
       env_->SleepForMicroseconds(1000);
       allow_delay = false;  // Do not delay a single write more than once
       mutex_.Lock();
+      // zhou: go back to while, try again.
+
     } else if (!force &&
                (mem_->ApproximateMemoryUsage() <= options_.write_buffer_size)) {
+      // zhou: "mem_" has enough room, write_buffer_size (4MB) looks like soft limit.
+      //       normal path.
+
       // There is room in current memtable
       break;
+
     } else if (imm_ != nullptr) {
+      // zhou: "mem_" doesn't have enough room, we need to convert it to "imm_".
+      //       But, "imm_" has not been completed minor compaction.
+      //       Have to block here, until
+
       // We have filled up the current memtable, but the previous
       // one is still being compacted, so we wait.
       Log(options_.info_log, "Current memtable full; waiting...\n");
+      // zhou: wait for compaction thread notification.
       background_work_finished_signal_.Wait();
+
     } else if (versions_->NumLevelFiles(0) >= config::kL0_StopWritesTrigger) {
+      // zhou: too many L0 sst files, kL0_StopWritesTrigger==12 is hard limit.
+
       // There are too many level-0 files.
       Log(options_.info_log, "Too many L0 files; waiting...\n");
       background_work_finished_signal_.Wait();
+
     } else {
+      // zhou: "mem_" is full, but could be converted to "imm_".
+
       // Attempt to switch to a new memtable and trigger compaction of old
+      // zhou: why must be 0 ???
       assert(versions_->PrevLogNumber() == 0);
+
       uint64_t new_log_number = versions_->NewFileNumber();
       WritableFile* lfile = nullptr;
       s = env_->NewWritableFile(LogFileName(dbname_, new_log_number), &lfile);
@@ -1363,18 +1425,32 @@ Status DBImpl::MakeRoomForWrite(bool force) {
         versions_->ReuseFileNumber(new_log_number);
         break;
       }
+
+      // zhou: delete log writer object only, will not write previous log file
+      //       through it
       delete log_;
+      // zhou: close previous log file fd.
       delete logfile_;
+
+      // zhou: new log writer and new log file
       logfile_ = lfile;
       logfile_number_ = new_log_number;
       log_ = new log::Writer(lfile);
+
       imm_ = mem_;
+      // zhou: background thread could detech that "imm_" need perform minor compaction.
       has_imm_.store(true, std::memory_order_release);
+
+      // zhou: new "mem_"
       mem_ = new MemTable(internal_comparator_);
       mem_->Ref();
       force = false;  // Do not force another compaction if have room
+
+      // zhou: try to schedule background thread.
       MaybeScheduleCompaction();
     }
+
+    // zhou: go back to while{}
   }
   return s;
 }
@@ -1459,31 +1535,45 @@ void DBImpl::GetApproximateSizes(const Range* range, int n, uint64_t* sizes) {
   v->Unref();
 }
 
+
+////////////////////////////////////////////////////////////////////////////////
+// zhou: class DB
+
+// zhou: add single KV record.
+
 // Default implementations of convenience methods that subclasses of DB
 // can call if they wish
 Status DB::Put(const WriteOptions& opt, const Slice& key, const Slice& value) {
   WriteBatch batch;
   batch.Put(key, value);
+  // zhou: DBImpl::Write()
   return Write(opt, &batch);
 }
 
+// zhou: delete single KV record.
 Status DB::Delete(const WriteOptions& opt, const Slice& key) {
   WriteBatch batch;
   batch.Delete(key);
+  // zhou: DBImpl::Write()
   return Write(opt, &batch);
 }
 
 DB::~DB() = default;
 
+// zhou: recover or create new db.
 Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   *dbptr = nullptr;
 
   DBImpl* impl = new DBImpl(options, dbname);
+
   impl->mutex_.Lock();
   VersionEdit edit;
   // Recover handles create_if_missing, error_if_exists
   bool save_manifest = false;
   Status s = impl->Recover(&edit, &save_manifest);
+
+  // zhou: new db or recovered without any log need replay.
+  //       So, we need to create log file and active memtable.
   if (s.ok() && impl->mem_ == nullptr) {
     // Create new log and a corresponding memtable.
     uint64_t new_log_number = impl->versions_->NewFileNumber();
@@ -1496,19 +1586,26 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
       impl->logfile_number_ = new_log_number;
       impl->log_ = new log::Writer(lfile);
       impl->mem_ = new MemTable(impl->internal_comparator_);
+
+      // zhou: increase reference count
       impl->mem_->Ref();
     }
   }
+
+  // zhou:
   if (s.ok() && save_manifest) {
     edit.SetPrevLogNumber(0);  // No older logs needed after recovery.
     edit.SetLogNumber(impl->logfile_number_);
     s = impl->versions_->LogAndApply(&edit, &impl->mutex_);
   }
+
   if (s.ok()) {
     impl->RemoveObsoleteFiles();
     impl->MaybeScheduleCompaction();
   }
   impl->mutex_.Unlock();
+
+
   if (s.ok()) {
     assert(impl->mem_ != nullptr);
     *dbptr = impl;
@@ -1520,6 +1617,7 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
 
 Snapshot::~Snapshot() = default;
 
+// zhou: delete DB, not only delete object, but also delete files on disk.
 Status DestroyDB(const std::string& dbname, const Options& options) {
   Env* env = options.env;
   std::vector<std::string> filenames;

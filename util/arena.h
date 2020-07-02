@@ -42,9 +42,12 @@ class Arena {
   char* alloc_ptr_;
   size_t alloc_bytes_remaining_;
 
+  // zhou: each block own variable size.
   // Array of new[] allocated memory blocks
   std::vector<char*> blocks_;
 
+  // zhou: Arena allocation is not thread safe, but other thread could fetch memory
+  //       usage.
   // Total memory usage of the arena.
   //
   // TODO(costan): This member is accessed via atomics, but the others are
@@ -52,6 +55,7 @@ class Arena {
   std::atomic<size_t> memory_usage_;
 };
 
+// zhou: allocate in compact way.
 inline char* Arena::Allocate(size_t bytes) {
   // The semantics of what to return are a bit messy if we allow
   // 0-byte allocations, so we disallow them here (we don't need
@@ -63,6 +67,8 @@ inline char* Arena::Allocate(size_t bytes) {
     alloc_bytes_remaining_ -= bytes;
     return result;
   }
+
+  // zhou: no enough space, allocate new memory.
   return AllocateFallback(bytes);
 }
 

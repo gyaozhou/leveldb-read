@@ -140,7 +140,7 @@ struct LEVELDB_EXPORT Options {
   // Many applications will benefit from passing the result of
   // NewBloomFilterPolicy() here.
   const FilterPolicy* filter_policy = nullptr;
-};
+}; // zhou: end of "struct Options"
 
 // Options that control read operations
 struct LEVELDB_EXPORT ReadOptions {
@@ -179,6 +179,8 @@ struct LEVELDB_EXPORT WriteOptions {
   // crash semantics as the "write()" system call.  A DB write
   // with sync==true has similar crash semantics to a "write()"
   // system call followed by "fsync()".
+
+  // zhou: once the data is useless when node restarted, set false is enough.
   bool sync = false;
 };
 

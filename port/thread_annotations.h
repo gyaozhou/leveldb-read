@@ -12,7 +12,7 @@
 #if !defined(THREAD_ANNOTATION_ATTRIBUTE__)
 
 #if defined(__clang__)
-
+// zhou: only clang support such attribute
 #define THREAD_ANNOTATION_ATTRIBUTE__(x) __attribute__((x))
 #else
 #define THREAD_ANNOTATION_ATTRIBUTE__(x)  // no-op

@@ -12,6 +12,10 @@ namespace leveldb {
 
 class MemTable;
 
+// zhou: don't want expose such interface, so seperate from "class WriteBatch".
+//       If all of them used by class WriteBatch internally, we could set them
+//       as private. But, these interface may be used by other internal class.
+
 // WriteBatchInternal provides static methods for manipulating a
 // WriteBatch that we don't want in the public WriteBatch interface.
 class WriteBatchInternal {

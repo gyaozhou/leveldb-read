@@ -271,6 +271,7 @@ class LEVELDB_EXPORT RandomAccessFile {
                       char* scratch) const = 0;
 };
 
+
 // A file abstraction for sequential writing.  The implementation
 // must provide buffering since callers may append small fragments
 // at a time to the file.

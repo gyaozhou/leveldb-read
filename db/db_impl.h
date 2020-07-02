@@ -173,13 +173,18 @@ class DBImpl : public DB {
   // State below is protected by mutex_
   port::Mutex mutex_;
   std::atomic<bool> shutting_down_;
+  // zhou: used by background/compaction thread notify Writer threads.
   port::CondVar background_work_finished_signal_ GUARDED_BY(mutex_);
+  // zhou:
   MemTable* mem_;
   MemTable* imm_ GUARDED_BY(mutex_);  // Memtable being compacted
   std::atomic<bool> has_imm_;         // So bg thread can detect non-null imm_
+
   WritableFile* logfile_;
   uint64_t logfile_number_ GUARDED_BY(mutex_);
+  // zhou: file handler to write log
   log::Writer* log_;
+
   uint32_t seed_ GUARDED_BY(mutex_);  // For sampling.
 
   // Queue of writers.
@@ -203,7 +208,7 @@ class DBImpl : public DB {
   Status bg_error_ GUARDED_BY(mutex_);
 
   CompactionStats stats_[config::kNumLevels] GUARDED_BY(mutex_);
-};
+}; // zhou: end of class DBImpl
 
 // Sanitize db options.  The caller should delete result.info_log if
 // it is not equal to src.info_log.

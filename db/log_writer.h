@@ -17,6 +17,7 @@ class WritableFile;
 
 namespace log {
 
+// zhou: README,
 class Writer {
  public:
   // Create a writer that will append data to "*dest".

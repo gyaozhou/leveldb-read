@@ -162,7 +162,8 @@ class Version {
   // are initialized by Finalize().
   double compaction_score_;
   int compaction_level_;
-};
+}; // zhou: end of class Version
+
 
 class VersionSet {
  public:
@@ -313,7 +314,9 @@ class VersionSet {
   // Per-level key at which the next compaction at that level should start.
   // Either an empty string, or a valid InternalKey.
   std::string compact_pointer_[config::kNumLevels];
-};
+}; // zhou: end of class VersionSet
+
+
 
 // A Compaction encapsulates information about a compaction.
 class Compaction {
@@ -386,7 +389,7 @@ class Compaction {
   // higher level than the ones involved in this compaction (i.e. for
   // all L >= level_ + 2).
   size_t level_ptrs_[config::kNumLevels];
-};
+}; // zhou: end of class Compaction
 
 }  // namespace leveldb
 

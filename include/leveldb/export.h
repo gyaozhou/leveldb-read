@@ -17,7 +17,13 @@
 #endif  // defined(LEVELDB_COMPILE_LIBRARY)
 
 #else  // defined(_WIN32)
+// zhou: linux
 #if defined(LEVELDB_COMPILE_LIBRARY)
+// zhou: used to export this symbol outside of this dynmaic library.
+//       In contract, hide this symbol by "visibility("hideen")".
+//       Only used in dynamic library.
+//       This is default behaivor, we can ignore it in linux if no compflict with
+//       other dynamic library export symbol.
 #define LEVELDB_EXPORT __attribute__((visibility("default")))
 #else
 #define LEVELDB_EXPORT
