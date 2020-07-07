@@ -162,6 +162,7 @@ static char* CopyString(const std::string& str) {
   return result;
 }
 
+// zhou:
 leveldb_t* leveldb_open(const leveldb_options_t* options, const char* name,
                         char** errptr) {
   DB* db;
@@ -432,6 +433,7 @@ leveldb_comparator_t* leveldb_comparator_create(
     int (*compare)(void*, const char* a, size_t alen, const char* b,
                    size_t blen),
     const char* (*name)(void*)) {
+
   leveldb_comparator_t* result = new leveldb_comparator_t;
   result->state_ = state;
   result->destructor_ = destructor;
@@ -518,6 +520,7 @@ void leveldb_writeoptions_set_sync(leveldb_writeoptions_t* opt, uint8_t v) {
   opt->rep.sync = v;
 }
 
+// zhou:
 leveldb_cache_t* leveldb_cache_create_lru(size_t capacity) {
   leveldb_cache_t* c = new leveldb_cache_t;
   c->rep = NewLRUCache(capacity);
@@ -529,8 +532,10 @@ void leveldb_cache_destroy(leveldb_cache_t* cache) {
   delete cache;
 }
 
+// zhou:
 leveldb_env_t* leveldb_create_default_env() {
   leveldb_env_t* result = new leveldb_env_t;
+  // zhou: there are 2 default Env, e.g. env_posix.cc
   result->rep = Env::Default();
   result->is_default = true;
   return result;

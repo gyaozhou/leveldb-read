@@ -9,9 +9,9 @@ find . -type f -name *.hh >> cscope.files
 
 if [ $# -eq 1 ]; then
     # remove test related files
-    echo "excludes some test files..."
+    echo "excludes some test, benchmarks files..."
     mv cscope.files cscope.files.bak
-    sed -e '/_test/d;/UnitTest/d;/\/test\//d' cscope.files.bak > cscope.files
+    sed -e '/_test/d;/UnitTest/d;/\/test\//d;/benchmarks/d' cscope.files.bak > cscope.files
     rm -f cscope.files.bak
 fi
 

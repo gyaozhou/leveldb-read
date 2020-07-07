@@ -297,7 +297,7 @@ void DBImpl::RemoveObsoleteFiles() {
   mutex_.Lock();
 }
 
-// zhou: recover db from files if exists.
+// zhou: README, recover db from files if exists.
 Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   mutex_.AssertHeld();
 
@@ -313,21 +313,26 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
 
   if (!env_->FileExists(CurrentFileName(dbname_))) {
     if (options_.create_if_missing) {
+        // zhou: files broken, recreate DB anyway.
       s = NewDB();
       if (!s.ok()) {
+          // zhou: create new DB completed.
         return s;
       }
     } else {
+        // zhou: want re-open DB, but the files broken.
       return Status::InvalidArgument(
           dbname_, "does not exist (create_if_missing is false)");
     }
   } else {
     if (options_.error_if_exists) {
+        // zhou: want create a new DB, but the files already exist.
       return Status::InvalidArgument(dbname_,
                                      "exists (error_if_exists is true)");
     }
   }
 
+  // zhou: files looks good so far, try to re-open DB.
   s = versions_->Recover(save_manifest);
   if (!s.ok()) {
     return s;
@@ -344,6 +349,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   const uint64_t min_log = versions_->LogNumber();
   const uint64_t prev_log = versions_->PrevLogNumber();
   std::vector<std::string> filenames;
+
   s = env_->GetChildren(dbname_, &filenames);
   if (!s.ok()) {
     return s;
@@ -370,6 +376,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   // Recover in the order in which the logs were generated
   std::sort(logs.begin(), logs.end());
   for (size_t i = 0; i < logs.size(); i++) {
+      // zhou:
     s = RecoverLogFile(logs[i], (i == logs.size() - 1), save_manifest, edit,
                        &max_sequence);
     if (!s.ok()) {
@@ -389,9 +396,11 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   return Status::OK();
 }
 
+// zhou: README,
 Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
                               bool* save_manifest, VersionEdit* edit,
                               SequenceNumber* max_sequence) {
+
   struct LogReporter : public log::Reader::Reporter {
     Env* env;
     Logger* info_log;
@@ -509,6 +518,7 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
   return status;
 }
 
+// zhou: README,
 Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
                                 Version* base) {
   mutex_.AssertHeld();
@@ -540,6 +550,7 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
     const Slice min_user_key = meta.smallest.user_key();
     const Slice max_user_key = meta.largest.user_key();
     if (base != nullptr) {
+        // zhou:
       level = base->PickLevelForMemTableOutput(min_user_key, max_user_key);
     }
     edit->AddFile(level, meta.number, meta.file_size, meta.smallest,
@@ -553,6 +564,7 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
   return s;
 }
 
+// zhou: README,
 void DBImpl::CompactMemTable() {
   mutex_.AssertHeld();
   assert(imm_ != nullptr);
@@ -666,8 +678,10 @@ void DBImpl::RecordBackgroundError(const Status& s) {
   }
 }
 
+// zhou: README,
 void DBImpl::MaybeScheduleCompaction() {
   mutex_.AssertHeld();
+
   if (background_compaction_scheduled_) {
     // Already scheduled
   } else if (shutting_down_.load(std::memory_order_acquire)) {
@@ -683,18 +697,22 @@ void DBImpl::MaybeScheduleCompaction() {
   }
 }
 
+// zhou:
 void DBImpl::BGWork(void* db) {
   reinterpret_cast<DBImpl*>(db)->BackgroundCall();
 }
 
+// zhou: README,
 void DBImpl::BackgroundCall() {
   MutexLock l(&mutex_);
   assert(background_compaction_scheduled_);
+
   if (shutting_down_.load(std::memory_order_acquire)) {
     // No more background work when shutting down.
   } else if (!bg_error_.ok()) {
     // No more background work after a background error.
   } else {
+    // zhou:
     BackgroundCompaction();
   }
 
@@ -706,6 +724,7 @@ void DBImpl::BackgroundCall() {
   background_work_finished_signal_.SignalAll();
 }
 
+// zhou: README, execute in dedicated thread
 void DBImpl::BackgroundCompaction() {
   mutex_.AssertHeld();
 
@@ -1119,6 +1138,8 @@ int64_t DBImpl::TEST_MaxNextLevelOverlappingBytes() {
   return versions_->MaxNextLevelOverlappingBytes();
 }
 
+
+// zhou: README, look up "mem_", then "imm_", then SST files via "versions_"
 Status DBImpl::Get(const ReadOptions& options, const Slice& key,
                    std::string* value) {
   Status s;
@@ -1247,17 +1268,23 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
     // into mem_.
     {
       mutex_.Unlock();
+      // zhou: append to WAL
       status = log_->AddRecord(WriteBatchInternal::Contents(write_batch));
       bool sync_error = false;
+
+      // zhou: have to fsync() when options set.
       if (status.ok() && options.sync) {
         status = logfile_->Sync();
         if (!status.ok()) {
           sync_error = true;
         }
       }
+
+      // zhou: write to log success, write to memtable "mem_".
       if (status.ok()) {
         status = WriteBatchInternal::InsertInto(write_batch, mem_);
       }
+
       mutex_.Lock();
       if (sync_error) {
         // The state of the log file is indeterminate: the log record we
@@ -1266,11 +1293,14 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
         RecordBackgroundError(status);
       }
     }
+
     if (write_batch == tmp_batch_) tmp_batch_->Clear();
 
+    // zhou:
     versions_->SetLastSequence(last_sequence);
   }
 
+  // zhou: maybe handled by other thread
   while (true) {
     Writer* ready = writers_.front();
     writers_.pop_front();
@@ -1289,6 +1319,8 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
 
   return status;
 }
+
+// zhou: README,
 
 // REQUIRES: Writer list must be non-empty
 // REQUIRES: First writer must have a non-null batch
@@ -1560,6 +1592,7 @@ Status DB::Delete(const WriteOptions& opt, const Slice& key) {
 
 DB::~DB() = default;
 
+
 // zhou: recover or create new db.
 Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   *dbptr = nullptr;
@@ -1596,6 +1629,7 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   if (s.ok() && save_manifest) {
     edit.SetPrevLogNumber(0);  // No older logs needed after recovery.
     edit.SetLogNumber(impl->logfile_number_);
+
     s = impl->versions_->LogAndApply(&edit, &impl->mutex_);
   }
 
@@ -1605,9 +1639,9 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   }
   impl->mutex_.Unlock();
 
-
   if (s.ok()) {
     assert(impl->mem_ != nullptr);
+    // zhou: done
     *dbptr = impl;
   } else {
     delete impl;
@@ -1615,7 +1649,9 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   return s;
 }
 
+
 Snapshot::~Snapshot() = default;
+
 
 // zhou: delete DB, not only delete object, but also delete files on disk.
 Status DestroyDB(const std::string& dbname, const Options& options) {

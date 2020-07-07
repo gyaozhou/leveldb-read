@@ -57,6 +57,7 @@ bool SomeFileOverlapsRange(const InternalKeyComparator& icmp,
                            const Slice* smallest_user_key,
                            const Slice* largest_user_key);
 
+// zhou: README, used to manage sst files.
 class Version {
  public:
   // Lookup the value for key.  If found, store it in *val and
@@ -72,6 +73,7 @@ class Version {
   // REQUIRES: This version has been saved (see VersionSet::SaveTo)
   void AddIterators(const ReadOptions&, std::vector<Iterator*>* iters);
 
+  // zhou: look up from SST files.
   Status Get(const ReadOptions&, const LookupKey& key, std::string* val,
              GetStats* stats);
 
@@ -165,6 +167,7 @@ class Version {
 }; // zhou: end of class Version
 
 
+// zhou:
 class VersionSet {
  public:
   VersionSet(const std::string& dbname, const Options* options,
@@ -299,6 +302,7 @@ class VersionSet {
   const Options* const options_;
   TableCache* const table_cache_;
   const InternalKeyComparator icmp_;
+
   uint64_t next_file_number_;
   uint64_t manifest_file_number_;
   uint64_t last_sequence_;
@@ -308,8 +312,11 @@ class VersionSet {
   // Opened lazily
   WritableFile* descriptor_file_;
   log::Writer* descriptor_log_;
+
+  // zhou: manage Version list
   Version dummy_versions_;  // Head of circular doubly-linked list of versions.
   Version* current_;        // == dummy_versions_.prev_
+
 
   // Per-level key at which the next compaction at that level should start.
   // Either an empty string, or a valid InternalKey.
@@ -369,6 +376,7 @@ class Compaction {
   int level_;
   uint64_t max_output_file_size_;
   Version* input_version_;
+    // zhou: compaction will create a new VersionEdit
   VersionEdit edit_;
 
   // Each compaction reads inputs from "level_" and "level_+1"

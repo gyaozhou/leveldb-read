@@ -26,7 +26,7 @@ struct FileMetaData {
   InternalKey largest;   // Largest internal key served by table
 };
 
-// zhou:
+// zhou: README,
 class VersionEdit {
  public:
   VersionEdit() { Clear(); }

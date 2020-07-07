@@ -40,17 +40,26 @@ namespace {
 
 // An entry is a variable length heap-allocated structure.  Entries
 // are kept in a circular doubly linked list ordered by access time.
+
+// zhou:
 struct LRUHandle {
   void* value;
   void (*deleter)(const Slice&, void* value);
-  LRUHandle* next_hash;
-  LRUHandle* next;
+
+  LRUHandle* next_hash; // zhou: used to solove hash value conflict
+  LRUHandle* next; // zhou: used in list sorted by LRU
   LRUHandle* prev;
+    // zhou: ???
   size_t charge;  // TODO(opt): Only allow uint32_t?
   size_t key_length;
   bool in_cache;     // Whether entry is in the cache.
   uint32_t refs;     // References, including cache reference, if present.
   uint32_t hash;     // Hash of key(); used for fast sharding and comparisons
+
+  // zhou: no more fields could following this filed.
+  //       "struct LRUHandle" will not allocate this one byte, the key full buffer
+  //       will be allocated with "struct LRUHandle" together.
+  //       So, "key_data" will refer to key full buffer.
   char key_data[1];  // Beginning of key
 
   Slice key() const {
@@ -67,6 +76,8 @@ struct LRUHandle {
 // table implementations in some of the compiler/runtime combinations
 // we have tested.  E.g., readrandom speeds up by ~5% over the g++
 // 4.4.3's builtin hashtable.
+
+// zhou: only take care with Hash Table, don't care about LRU list.
 class HandleTable {
  public:
   HandleTable() : length_(0), elems_(0), list_(nullptr) { Resize(); }
@@ -79,8 +90,13 @@ class HandleTable {
   LRUHandle* Insert(LRUHandle* h) {
     LRUHandle** ptr = FindPointer(h->key(), h->hash);
     LRUHandle* old = *ptr;
+
+    // zhou: update current node's "next_hash" value.
     h->next_hash = (old == nullptr ? nullptr : old->next_hash);
+    // zhou: update previous node's "next_hash" value.
     *ptr = h;
+
+    // zhou: no duplicated node found.
     if (old == nullptr) {
       ++elems_;
       if (elems_ > length_) {
@@ -89,6 +105,8 @@ class HandleTable {
         Resize();
       }
     }
+
+    // zhou: return old node, since its "next" and "prev" should updated in LRU list.
     return old;
   }
 
@@ -96,6 +114,7 @@ class HandleTable {
     LRUHandle** ptr = FindPointer(key, hash);
     LRUHandle* result = *ptr;
     if (result != nullptr) {
+      // zhou: remove current node from single list
       *ptr = result->next_hash;
       --elems_;
     }
@@ -114,12 +133,17 @@ class HandleTable {
   // pointer to the trailing slot in the corresponding linked list.
   LRUHandle** FindPointer(const Slice& key, uint32_t hash) {
     LRUHandle** ptr = &list_[hash & (length_ - 1)];
+    // zhou: seach list of this array entry
     while (*ptr != nullptr && ((*ptr)->hash != hash || key != (*ptr)->key())) {
+      // zhou: get previous node's "next_hash" address. By this way, it's easy
+      //       to remove a node from single list.
       ptr = &(*ptr)->next_hash;
     }
     return ptr;
   }
 
+  // zhou: copy element one by one, low performance.
+  //       Will not impact LRU list.
   void Resize() {
     uint32_t new_length = 4;
     while (new_length < elems_) {
@@ -127,12 +151,14 @@ class HandleTable {
     }
     LRUHandle** new_list = new LRUHandle*[new_length];
     memset(new_list, 0, sizeof(new_list[0]) * new_length);
+
     uint32_t count = 0;
     for (uint32_t i = 0; i < length_; i++) {
       LRUHandle* h = list_[i];
       while (h != nullptr) {
         LRUHandle* next = h->next_hash;
         uint32_t hash = h->hash;
+        // zhou: insert to new hash table
         LRUHandle** ptr = &new_list[hash & (new_length - 1)];
         h->next_hash = *ptr;
         *ptr = h;
@@ -140,12 +166,13 @@ class HandleTable {
         count++;
       }
     }
+
     assert(elems_ == count);
     delete[] list_;
     list_ = new_list;
     length_ = new_length;
   }
-};
+}; // zhou: end of "class HandleTable"
 
 // A single shard of sharded cache.
 class LRUCache {
@@ -192,6 +219,7 @@ class LRUCache {
   // Entries are in use by clients, and have refs >= 2 and in_cache==true.
   LRUHandle in_use_ GUARDED_BY(mutex_);
 
+  // zhou: hash table
   HandleTable table_ GUARDED_BY(mutex_);
 };
 
@@ -204,7 +232,10 @@ LRUCache::LRUCache() : capacity_(0), usage_(0) {
 }
 
 LRUCache::~LRUCache() {
+  // zhou: make sure all elements are released
   assert(in_use_.next == &in_use_);  // Error if caller has an unreleased handle
+
+  // zhou:
   for (LRUHandle* e = lru_.next; e != &lru_;) {
     LRUHandle* next = e->next;
     assert(e->in_cache);
@@ -216,6 +247,7 @@ LRUCache::~LRUCache() {
 }
 
 void LRUCache::Ref(LRUHandle* e) {
+  // zhou: "e->refs == 1", stands for it must be in "lru_" list.
   if (e->refs == 1 && e->in_cache) {  // If on lru_ list, move to in_use_ list.
     LRU_Remove(e);
     LRU_Append(&in_use_, e);
@@ -264,21 +296,26 @@ void LRUCache::Release(Cache::Handle* handle) {
   Unref(reinterpret_cast<LRUHandle*>(handle));
 }
 
+// zhou: LRU may be disabled "capacity_ == 0", so check returned "e->in_cache"
 Cache::Handle* LRUCache::Insert(const Slice& key, uint32_t hash, void* value,
                                 size_t charge,
                                 void (*deleter)(const Slice& key,
                                                 void* value)) {
   MutexLock l(&mutex_);
 
+  // zhou: - 1, used for minus "char key_data[1]"
   LRUHandle* e =
       reinterpret_cast<LRUHandle*>(malloc(sizeof(LRUHandle) - 1 + key.size()));
+  // zhou: value is pointer
   e->value = value;
   e->deleter = deleter;
   e->charge = charge;
   e->key_length = key.size();
   e->hash = hash;
   e->in_cache = false;
+  // zhou: the returned handle also hold one reference.
   e->refs = 1;  // for the returned handle.
+  // zhou: copy key
   std::memcpy(e->key_data, key.data(), key.size());
 
   if (capacity_ > 0) {
@@ -286,11 +323,14 @@ Cache::Handle* LRUCache::Insert(const Slice& key, uint32_t hash, void* value,
     e->in_cache = true;
     LRU_Append(&in_use_, e);
     usage_ += charge;
+
+    // zhou: once the old value exist, release it.
     FinishErase(table_.Insert(e));
   } else {  // don't cache. (capacity_==0 is supported and turns off caching.)
     // next is read by key() in an assert, so it must be initialized
     e->next = nullptr;
   }
+
   while (usage_ > capacity_ && lru_.next != &lru_) {
     LRUHandle* old = lru_.next;
     assert(old->refs == 1);
@@ -333,11 +373,16 @@ void LRUCache::Prune() {
   }
 }
 
+
+////////////////////////////////////////////////////////////////////////////////
+
 static const int kNumShardBits = 4;
 static const int kNumShards = 1 << kNumShardBits;
 
+// zhou:
 class ShardedLRUCache : public Cache {
  private:
+    // zhou: several LRU list
   LRUCache shard_[kNumShards];
   port::Mutex id_mutex_;
   uint64_t last_id_;
@@ -356,6 +401,7 @@ class ShardedLRUCache : public Cache {
     }
   }
   ~ShardedLRUCache() override {}
+
   Handle* Insert(const Slice& key, void* value, size_t charge,
                  void (*deleter)(const Slice& key, void* value)) override {
     const uint32_t hash = HashSlice(key);
@@ -392,10 +438,11 @@ class ShardedLRUCache : public Cache {
     }
     return total;
   }
-};
+}; // zhou: end of "class ShardedLRUCache"
 
 }  // end anonymous namespace
 
+// zhou: the only API refer to "class ShardedLRUCache"
 Cache* NewLRUCache(size_t capacity) { return new ShardedLRUCache(capacity); }
 
 }  // namespace leveldb

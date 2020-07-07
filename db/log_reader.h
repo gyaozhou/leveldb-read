@@ -19,6 +19,7 @@ namespace log {
 
 class Reader {
  public:
+  // zhou: class Reader's user could implement it, and provide to class Reader Ctor.
   // Interface for reporting errors.
   class Reporter {
    public:
@@ -92,8 +93,11 @@ class Reader {
   Slice buffer_;
   bool eof_;  // Last Read() indicated EOF by returning < kBlockSize
 
+  // zhou: offset for read
   // Offset of the last record returned by ReadRecord.
   uint64_t last_record_offset_;
+
+  // zhou: ???
   // Offset of the first location past the end of buffer_.
   uint64_t end_of_buffer_offset_;
 
@@ -104,7 +108,7 @@ class Reader {
   // particular, a run of kMiddleType and kLastType records can be silently
   // skipped in this mode
   bool resyncing_;
-};
+}; // zhou: end of "class Reader"
 
 }  // namespace log
 }  // namespace leveldb

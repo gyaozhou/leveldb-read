@@ -83,6 +83,7 @@ class CondVar {
   Mutex* const mu_;
 };
 
+// zhou: compress/uncompress using snappy
 inline bool Snappy_Compress(const char* input, size_t length,
                             std::string* output) {
 #if HAVE_SNAPPY

@@ -15,6 +15,7 @@ namespace leveldb {
 
 class WritableFile;
 
+// zhou: namespace log, is used for logging WAL and menifest log.
 namespace log {
 
 // zhou: README,

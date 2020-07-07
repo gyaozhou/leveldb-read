@@ -98,7 +98,7 @@ class LEVELDB_EXPORT Status {
   //    state_[4]    == code
   //    state_[5..]  == message
   const char* state_;
-};
+}; // zhou: end of class Status
 
 inline Status::Status(const Status& rhs) {
   state_ = (rhs.state_ == nullptr) ? nullptr : CopyState(rhs.state_);

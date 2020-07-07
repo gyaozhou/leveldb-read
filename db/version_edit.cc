@@ -102,6 +102,7 @@ static bool GetLevel(Slice* input, int* level) {
   }
 }
 
+// zhou: README,
 Status VersionEdit::DecodeFrom(const Slice& src) {
   Clear();
   Slice input = src;

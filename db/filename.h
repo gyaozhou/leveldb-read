@@ -19,12 +19,21 @@ namespace leveldb {
 class Env;
 
 enum FileType {
+  // zhou: xxxxxx.log, WAL. At most 2 files, one for "mem_", one for "imm_".
+  //       Once "mem_" switch to "imm_", a new log should be created.
+  //       Once "imm_" was destaged completed, the log will be deleted.
   kLogFile,
+  // zhou: LOCK, prevent multiply process handle DB
   kDBLockFile,
+  // zhou: xxxxxx.ldb, SST file
   kTableFile,
+  // zhou: MANIFEST-xxxxxx
   kDescriptorFile,
+  // zhou: CURRENT, with content "MANIFEST-000004"
   kCurrentFile,
+  // zhou: ?
   kTempFile,
+  // zhou: LOG or LOG.old, debug log
   kInfoLogFile  // Either the current one, or an old one
 };
 

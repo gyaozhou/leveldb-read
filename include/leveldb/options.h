@@ -139,6 +139,7 @@ struct LEVELDB_EXPORT Options {
   // If non-null, use the specified filter policy to reduce disk reads.
   // Many applications will benefit from passing the result of
   // NewBloomFilterPolicy() here.
+  // zhou: specify filter policy to accelerate Get()
   const FilterPolicy* filter_policy = nullptr;
 }; // zhou: end of "struct Options"
 

@@ -321,6 +321,7 @@ void Version::ForEachOverlapping(Slice user_key, Slice internal_key, void* arg,
   }
 }
 
+// zhou: README,
 Status Version::Get(const ReadOptions& options, const LookupKey& k,
                     std::string* value, GetStats* stats) {
   stats->seek_file = nullptr;
@@ -467,6 +468,7 @@ bool Version::OverlapInLevel(int level, const Slice* smallest_user_key,
                                smallest_user_key, largest_user_key);
 }
 
+// zhou: README,
 int Version::PickLevelForMemTableOutput(const Slice& smallest_user_key,
                                         const Slice& largest_user_key) {
   int level = 0;
@@ -563,6 +565,8 @@ std::string Version::DebugString() const {
   return r;
 }
 
+// zhou: private class defined in class Version.
+
 // A helper class so we can efficiently apply a whole sequence
 // of edits to a particular state without creating intermediate
 // Versions that contain full copies of the intermediate state.
@@ -625,6 +629,7 @@ class VersionSet::Builder {
     base_->Unref();
   }
 
+  // zhou:
   // Apply all of the edits in *edit to the current state.
   void Apply(VersionEdit* edit) {
     // Update compaction pointers
@@ -668,6 +673,7 @@ class VersionSet::Builder {
     }
   }
 
+  // zhou: README,
   // Save the current state in *v.
   void SaveTo(Version* v) {
     BySmallestKey cmp;
@@ -728,7 +734,7 @@ class VersionSet::Builder {
       files->push_back(f);
     }
   }
-};
+}; // zhou: end of "class VersionSet:Builder"
 
 VersionSet::VersionSet(const std::string& dbname, const Options* options,
                        TableCache* table_cache,
@@ -757,13 +763,16 @@ VersionSet::~VersionSet() {
   delete descriptor_file_;
 }
 
+// zhou: README,
 void VersionSet::AppendVersion(Version* v) {
   // Make "v" current
   assert(v->refs_ == 0);
   assert(v != current_);
+
   if (current_ != nullptr) {
     current_->Unref();
   }
+
   current_ = v;
   v->Ref();
 
@@ -859,8 +868,10 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
   return s;
 }
 
-// zhou: README,
+// zhou: README, recover from MANIFEST.xxxxxx which indicated by file CURRENT.
 Status VersionSet::Recover(bool* save_manifest) {
+
+  // zhou: define concrete class to handle "Corruption" when read file.
   struct LogReporter : public log::Reader::Reporter {
     Status* status;
     void Corruption(size_t bytes, const Status& s) override {
@@ -868,6 +879,7 @@ Status VersionSet::Recover(bool* save_manifest) {
     }
   };
 
+  // zhou: read file "CURRENT" file to "current"
   // Read "CURRENT" file, which contains a pointer to the current manifest file
   std::string current;
   Status s = ReadFileToString(env_, CurrentFileName(dbname_), &current);
@@ -879,8 +891,10 @@ Status VersionSet::Recover(bool* save_manifest) {
   }
   current.resize(current.size() - 1);
 
+  // zhou: file "CURRENT" indicate the MANIFEST.xxxxx
   std::string dscname = dbname_ + "/" + current;
   SequentialFile* file;
+  // zhou: the way to read/write this file.
   s = env_->NewSequentialFile(dscname, &file);
   if (!s.ok()) {
     if (s.IsNotFound()) {
@@ -903,8 +917,11 @@ Status VersionSet::Recover(bool* save_manifest) {
   {
     LogReporter reporter;
     reporter.status = &s;
+    // zhou: there is no header in MANIFEST.xxxxxx
     log::Reader reader(file, &reporter, true /*checksum*/,
                        0 /*initial_offset*/);
+
+    // zhou: start to read CURRENT manifest,
     Slice record;
     std::string scratch;
     while (reader.ReadRecord(&record, &scratch) && s.ok()) {
@@ -943,7 +960,9 @@ Status VersionSet::Recover(bool* save_manifest) {
         have_last_sequence = true;
       }
     }
+
   }
+
   delete file;
   file = nullptr;
 
@@ -960,16 +979,21 @@ Status VersionSet::Recover(bool* save_manifest) {
       prev_log_number = 0;
     }
 
+    // zhou: set "next_file_number_"
     MarkFileNumberUsed(prev_log_number);
     MarkFileNumberUsed(log_number);
   }
 
   if (s.ok()) {
+      // zhou: save to version
     Version* v = new Version(this);
     builder.SaveTo(v);
+
     // Install recovered version
     Finalize(v);
+
     AppendVersion(v);
+
     manifest_file_number_ = next_file;
     next_file_number_ = next_file + 1;
     last_sequence_ = last_sequence;
@@ -980,6 +1004,7 @@ Status VersionSet::Recover(bool* save_manifest) {
     if (ReuseManifest(dscname, current)) {
       // No need to save new manifest
     } else {
+      // zhou: need to save new manifest
       *save_manifest = true;
     }
   }
@@ -987,24 +1012,30 @@ Status VersionSet::Recover(bool* save_manifest) {
   return s;
 }
 
+// zhou: README,
 bool VersionSet::ReuseManifest(const std::string& dscname,
                                const std::string& dscbase) {
   if (!options_->reuse_logs) {
     return false;
   }
+
   FileType manifest_type;
   uint64_t manifest_number;
   uint64_t manifest_size;
+
   if (!ParseFileName(dscbase, &manifest_number, &manifest_type) ||
       manifest_type != kDescriptorFile ||
       !env_->GetFileSize(dscname, &manifest_size).ok() ||
       // Make new compacted MANIFEST if old one is too big
       manifest_size >= TargetFileSize(options_)) {
+    // zhou: current MANIFEST is too large
     return false;
   }
 
   assert(descriptor_file_ == nullptr);
   assert(descriptor_log_ == nullptr);
+
+  // zhou: could reuse this MANIFEST file, could append it.
   Status r = env_->NewAppendableFile(dscname, &descriptor_file_);
   if (!r.ok()) {
     Log(options_->info_log, "Reuse MANIFEST: %s\n", r.ToString().c_str());
@@ -1015,6 +1046,7 @@ bool VersionSet::ReuseManifest(const std::string& dscname,
   Log(options_->info_log, "Reusing MANIFEST %s\n", dscname.c_str());
   descriptor_log_ = new log::Writer(descriptor_file_, manifest_size);
   manifest_file_number_ = manifest_number;
+
   return true;
 }
 
@@ -1024,6 +1056,7 @@ void VersionSet::MarkFileNumberUsed(uint64_t number) {
   }
 }
 
+// zhou: README,
 void VersionSet::Finalize(Version* v) {
   // Precomputed best level for next compaction
   int best_level = -1;

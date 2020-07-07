@@ -11,6 +11,9 @@
 namespace leveldb {
 namespace log {
 
+// zhou: the user record (in format of write batch) may cross several WAL block,
+//       which size is kBlockSize.
+//       The user record prefix with Header, consist a record within WAL block.
 enum RecordType {
   // Zero is reserved for preallocated files
   kZeroType = 0,
@@ -24,6 +27,9 @@ enum RecordType {
 };
 static const int kMaxRecordType = kLastType;
 
+
+// zhou: 32768 == 0x8000 == 8 * 4KB == 32KB
+//       LevelDB log file, including WAL and MANIFEST, is managed in fixed block //       size 32KB.
 static const int kBlockSize = 32768;
 
 // Header is checksum (4 bytes), length (2 bytes), type (1 byte).

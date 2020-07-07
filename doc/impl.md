@@ -76,6 +76,10 @@ In the background:
 
 ## Compactions
 
+> zhou: a lot of details worth to read. The major purpose is control compaction
+pace, avoid to compact too much impact front end performance, avoid to compact
+too slower which can not cache up front end writing.
+
 When the size of level L exceeds its limit, we compact it in a background
 thread. The compaction picks a file from level L and all overlapping files from
 the next level L+1. Note that if a level-L file overlaps only part of a

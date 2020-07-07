@@ -38,6 +38,7 @@ namespace leveldb {
 
 class Arena;
 
+// zhou: README,
 template <typename Key, class Comparator>
 class SkipList {
  private:
@@ -96,9 +97,10 @@ class SkipList {
     const SkipList* list_;
     Node* node_;
     // Intentionally copyable
-  };
+  }; // zhou: end of class Iterator
 
  private:
+  // zhou: support 2^12 node at least.
   enum { kMaxHeight = 12 };
 
   inline int GetMaxHeight() const {
@@ -127,6 +129,7 @@ class SkipList {
   // Return head_ if list is empty.
   Node* FindLast() const;
 
+
   // Immutable after construction
   Comparator const compare_;
   Arena* const arena_;  // Arena used for allocations of nodes
@@ -139,11 +142,12 @@ class SkipList {
 
   // Read/written only by Insert().
   Random rnd_;
-};
+}; // zhou: end of class SkipList
 
 // Implementation details follow
 template <typename Key, class Comparator>
 struct SkipList<Key, Comparator>::Node {
+
   explicit Node(const Key& k) : key(k) {}
 
   Key const key;
@@ -176,7 +180,7 @@ struct SkipList<Key, Comparator>::Node {
  private:
   // Array of length equal to the node height.  next_[0] is lowest level link.
   std::atomic<Node*> next_[1];
-};
+}; // zhou: end of struct Node
 
 template <typename Key, class Comparator>
 typename SkipList<Key, Comparator>::Node* SkipList<Key, Comparator>::NewNode(

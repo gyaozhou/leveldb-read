@@ -788,6 +788,7 @@ void EnvWindowsTestHelper::SetReadOnlyMMapLimit(int limit) {
   g_mmap_limit = limit;
 }
 
+// zhou: Windows default definition.
 Env* Env::Default() {
   static WindowsDefaultEnv env_container;
   return env_container.env();

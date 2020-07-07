@@ -57,6 +57,9 @@ class LEVELDB_EXPORT Env {
 
   virtual ~Env();
 
+  // zhou: Both Linux and Windows will only one definition for this function.
+  //       CMakeLists.txt will enable one of them.
+
   // Return a default environment suitable for the current operating
   // system.  Sophisticated users may wish to provide their own Env
   // implementation instead of relying on this default environment.
@@ -216,7 +219,7 @@ class LEVELDB_EXPORT Env {
 
   // Sleep/delay the thread for the prescribed number of micro-seconds.
   virtual void SleepForMicroseconds(int micros) = 0;
-};
+}; // zhou: end of "Env"
 
 // A file abstraction for reading sequentially through a file
 class LEVELDB_EXPORT SequentialFile {

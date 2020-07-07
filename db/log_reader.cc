@@ -30,15 +30,21 @@ Reader::Reader(SequentialFile* file, Reporter* reporter, bool checksum,
 
 Reader::~Reader() { delete[] backing_store_; }
 
+// zhou: once "initial_offset_" > 0, skip several blocks.
+//       kBlockSize == 8*4KB, only skip multiply blocks
 bool Reader::SkipToInitialBlock() {
   const size_t offset_in_block = initial_offset_ % kBlockSize;
   uint64_t block_start_location = initial_offset_ - offset_in_block;
 
+  // zhou: refer to doc/log_format.md, the log is consist with sequential 32KB
+  //       blocks.
+  //       "A record never starts within the last six bytes of a block (since it won't fit)."
   // Don't search a block if we'd be in the trailer
   if (offset_in_block > kBlockSize - 6) {
     block_start_location += kBlockSize;
   }
 
+  // zhou: the number of bytes skipped, multiply blocks
   end_of_buffer_offset_ = block_start_location;
 
   // Skip to start of first block that can contain the initial record
@@ -53,6 +59,7 @@ bool Reader::SkipToInitialBlock() {
   return true;
 }
 
+// zhou: README,
 bool Reader::ReadRecord(Slice* record, std::string* scratch) {
   if (last_record_offset_ < initial_offset_) {
     if (!SkipToInitialBlock()) {
@@ -62,12 +69,14 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
 
   scratch->clear();
   record->clear();
+
   bool in_fragmented_record = false;
   // Record offset of the logical record that we're reading
   // 0 is a dummy value to make compilers happy
   uint64_t prospective_record_offset = 0;
 
   Slice fragment;
+
   while (true) {
     const unsigned int record_type = ReadPhysicalRecord(&fragment);
 

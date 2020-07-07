@@ -48,6 +48,7 @@ static const int kReadBytesPeriod = 1048576;
 
 class InternalKey;
 
+// zhou: used in write batch which then be used in WAL.
 // Value types encoded as the last component of internal keys.
 // DO NOT CHANGE THESE ENUM VALUES: they are embedded in the on-disk
 // data structures.

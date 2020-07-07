@@ -37,6 +37,7 @@
 
 namespace leveldb {
 
+// zhou: anonymous namespace, prevent access from out of this file.
 namespace {
 
 // Set by EnvPosixTestHelper::SetReadOnlyMMapLimit() and MaxOpenFiles().
@@ -101,6 +102,8 @@ class Limiter {
   std::atomic<int> acquires_allowed_;
 };
 
+// zhou: read file in sequential way
+
 // Implements sequential read access in a file using read().
 //
 // Instances of this class are thread-friendly but not thread-safe, as required
@@ -139,6 +142,9 @@ class PosixSequentialFile final : public SequentialFile {
   const int fd_;
   const std::string filename_;
 };
+
+
+// zhou: read file in random way
 
 // Implements random read access in a file using pread().
 //
@@ -487,6 +493,7 @@ class PosixLockTable {
   std::set<std::string> locked_files_ GUARDED_BY(mu_);
 };
 
+// zhou: defined in source file, due to only "Env::Default()" need it.
 class PosixEnv : public Env {
  public:
   PosixEnv();
@@ -634,10 +641,12 @@ class PosixEnv : public Env {
     }
 
     if (!locks_.Insert(filename)) {
+      // zhou: already hold by current process
       ::close(fd);
       return Status::IOError("lock " + filename, "already held by process");
     }
 
+    // zhou: lock whole file size
     if (LockOrUnlock(fd, true) == -1) {
       int lock_errno = errno;
       ::close(fd);
@@ -747,7 +756,9 @@ class PosixEnv : public Env {
   PosixLockTable locks_;  // Thread-safe.
   Limiter mmap_limiter_;  // Thread-safe.
   Limiter fd_limiter_;    // Thread-safe.
-};
+}; // zhou: end of "class PosixEnv"
+
+
 
 // Return the maximum number of concurrent mmaps.
 int MaxMmaps() { return g_mmap_limit; }
@@ -778,9 +789,11 @@ PosixEnv::PosixEnv()
       mmap_limiter_(MaxMmaps()),
       fd_limiter_(MaxOpenFiles()) {}
 
+// zhou: create new thread to execute "background_work_function"
 void PosixEnv::Schedule(
     void (*background_work_function)(void* background_work_arg),
     void* background_work_arg) {
+
   background_work_mutex_.Lock();
 
   // Start the background thread, if we haven't done so already.
@@ -818,6 +831,7 @@ void PosixEnv::BackgroundThreadMain() {
   }
 }
 
+// zhou: anonymous namespace, prevent access from out of this file.
 namespace {
 
 // Wraps an Env instance whose destructor is never created.
@@ -850,6 +864,7 @@ class SingletonEnv {
   SingletonEnv(const SingletonEnv&) = delete;
   SingletonEnv& operator=(const SingletonEnv&) = delete;
 
+  // zhou: why need to reinterpret_cast??? due to template.
   Env* env() { return reinterpret_cast<Env*>(&env_storage_); }
 
   static void AssertEnvNotInitialized() {
@@ -864,13 +879,14 @@ class SingletonEnv {
 #if !defined(NDEBUG)
   static std::atomic<bool> env_initialized_;
 #endif  // !defined(NDEBUG)
-};
+}; // zhou: end of template class SingletonEnv
 
 #if !defined(NDEBUG)
 template <typename EnvType>
 std::atomic<bool> SingletonEnv<EnvType>::env_initialized_;
 #endif  // !defined(NDEBUG)
 
+// zhou: make template instance
 using PosixDefaultEnv = SingletonEnv<PosixEnv>;
 
 }  // namespace
@@ -885,6 +901,9 @@ void EnvPosixTestHelper::SetReadOnlyMMapLimit(int limit) {
   g_mmap_limit = limit;
 }
 
+// zhou: Linux default definition.
+//       This interface expose all env_posix need to expose. So nobody else need to
+//       inclucde class PosixEnv.
 Env* Env::Default() {
   static PosixDefaultEnv env_container;
   return env_container.env();

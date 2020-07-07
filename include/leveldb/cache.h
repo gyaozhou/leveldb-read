@@ -42,6 +42,7 @@ class LEVELDB_EXPORT Cache {
   // function that was passed to the constructor.
   virtual ~Cache();
 
+  // zhou: work like "void", used to replace "void *".
   // Opaque handle to an entry stored in the cache.
   struct Handle {};
 
@@ -104,7 +105,7 @@ class LEVELDB_EXPORT Cache {
 
   struct Rep;
   Rep* rep_;
-};
+}; // zhou: end of "class Cache"
 
 }  // namespace leveldb
 

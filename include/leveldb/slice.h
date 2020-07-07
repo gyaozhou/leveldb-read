@@ -24,6 +24,8 @@
 
 namespace leveldb {
 
+// zhou: Slice will not copy data in Ctor, just a light struct to refer to origin data.
+//       So the data life cycle should be maintained outside.
 class LEVELDB_EXPORT Slice {
  public:
   // Create an empty slice.
@@ -71,6 +73,7 @@ class LEVELDB_EXPORT Slice {
     size_ -= n;
   }
 
+  // zhou: make a copy
   // Return a string that contains the copy of the referenced data.
   std::string ToString() const { return std::string(data_, size_); }
 
@@ -90,12 +93,14 @@ class LEVELDB_EXPORT Slice {
   size_t size_;
 };
 
+// zhou: free function
 inline bool operator==(const Slice& x, const Slice& y) {
   return ((x.size() == y.size()) &&
           (memcmp(x.data(), y.data(), x.size()) == 0));
 }
 
 inline bool operator!=(const Slice& x, const Slice& y) { return !(x == y); }
+
 
 inline int Slice::compare(const Slice& b) const {
   const size_t min_len = (size_ < b.size_) ? size_ : b.size_;
