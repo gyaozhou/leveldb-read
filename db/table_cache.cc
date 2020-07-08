@@ -97,6 +97,7 @@ Iterator* TableCache::NewIterator(const ReadOptions& options,
   return result;
 }
 
+// zhou: README, search in one SST cache firstly. Once missing, search SST.
 Status TableCache::Get(const ReadOptions& options, uint64_t file_number,
                        uint64_t file_size, const Slice& k, void* arg,
                        void (*handle_result)(void*, const Slice&,
@@ -105,6 +106,7 @@ Status TableCache::Get(const ReadOptions& options, uint64_t file_number,
   Status s = FindTable(file_number, file_size, &handle);
   if (s.ok()) {
     Table* t = reinterpret_cast<TableAndFile*>(cache_->Value(handle))->table;
+    // zhou: Table::InternalGet()
     s = t->InternalGet(options, k, arg, handle_result);
     cache_->Release(handle);
   }

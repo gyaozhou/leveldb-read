@@ -80,7 +80,7 @@ class MemTable {
   int refs_;
   Arena arena_;
   Table table_;
-};
+}; // zhou: class MemTable
 
 }  // namespace leveldb
 

@@ -1181,15 +1181,19 @@ int64_t DBImpl::TEST_MaxNextLevelOverlappingBytes() {
 
 
 // zhou: README, look up "mem_", then "imm_", then SST files via "versions_"
+//       ReadOptions "options" provided snapshot version ..
 Status DBImpl::Get(const ReadOptions& options, const Slice& key,
                    std::string* value) {
   Status s;
   MutexLock l(&mutex_);
   SequenceNumber snapshot;
+
+  // zhou: read from snapshot or latest version.
   if (options.snapshot != nullptr) {
     snapshot =
         static_cast<const SnapshotImpl*>(options.snapshot)->sequence_number();
   } else {
+    // zhou: latest version
     snapshot = versions_->LastSequence();
   }
 
@@ -1206,8 +1210,10 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
   // Unlock while reading from files and memtables
   {
     mutex_.Unlock();
+
     // First look in the memtable, then in the immutable memtable (if any).
     LookupKey lkey(key, snapshot);
+    // zhou: MemTable::Get()
     if (mem->Get(lkey, value, &s)) {
       // Done
     } else if (imm != nullptr && imm->Get(lkey, value, &s)) {
@@ -1222,9 +1228,11 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
   if (have_stat_update && current->UpdateStats(stats)) {
     MaybeScheduleCompaction();
   }
+
   mem->Unref();
   if (imm != nullptr) imm->Unref();
   current->Unref();
+
   return s;
 }
 
