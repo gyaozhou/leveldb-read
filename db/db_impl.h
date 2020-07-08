@@ -73,6 +73,8 @@ class DBImpl : public DB {
 
  private:
   friend class DB;
+
+  // zhou: nested struct
   struct CompactionState;
   struct Writer;
 
@@ -188,8 +190,10 @@ class DBImpl : public DB {
 
   uint32_t seed_ GUARDED_BY(mutex_);  // For sampling.
 
+  // zhou: a queue of write task, shared by all thread perform write
   // Queue of writers.
   std::deque<Writer*> writers_ GUARDED_BY(mutex_);
+  // zhou: used temporaty to collect write task in batch
   WriteBatch* tmp_batch_ GUARDED_BY(mutex_);
 
   SnapshotList snapshots_ GUARDED_BY(mutex_);

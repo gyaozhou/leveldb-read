@@ -162,7 +162,7 @@ static char* CopyString(const std::string& str) {
   return result;
 }
 
-// zhou:
+// zhou: API
 leveldb_t* leveldb_open(const leveldb_options_t* options, const char* name,
                         char** errptr) {
   DB* db;

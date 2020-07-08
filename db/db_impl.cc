@@ -40,7 +40,6 @@ namespace leveldb {
 const int kNumNonTableCacheFiles = 10;
 
 // zhou: like task context
-
 // Information kept for every waiting writer
 struct DBImpl::Writer {
   explicit Writer(port::Mutex* mu)
@@ -1281,26 +1280,37 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
 
   MutexLock l(&mutex_);
 
-  // zhou: due to there are may be multiply threads invoke DB::Write().
+  // zhou: due to there are may be several threads invoke DB::Write().
   //       Here perform synchronization to serialize concurrent write.
   writers_.push_back(&w);
+
   // zhou: wait for all previous DBImpl::Writer completed in other write thread.
   while (!w.done && &w != writers_.front()) {
       // zhou: "mutex_" released
    w.cv.Wait();
   }
-  // zhou: when will be here?
+  // zhou: take the lock and current write task has been done by others thread
+  //       (because every thread will try to perform several write task a ont time),
+  //       or not done but is in task queue head.
+
   if (w.done) {
     return w.status;
   }
 
+  // zhou: maybe block for compaction
   // May temporarily unlock and wait.
   Status status = MakeRoomForWrite(updates == nullptr);
 
   uint64_t last_sequence = versions_->LastSequence();
+  // zhou: used in nullptr batch
   Writer* last_writer = &w;
+
+  // zhou: is NOT compaction by force
   if (status.ok() && updates != nullptr) {  // nullptr batch is for compactions
+    // zhou: collect more write batch into a write batch
     WriteBatch* write_batch = BuildBatchGroup(&last_writer);
+
+    // zhou: set sequence for this write batch
     WriteBatchInternal::SetSequence(write_batch, last_sequence + 1);
     last_sequence += WriteBatchInternal::Count(write_batch);
 
@@ -1310,7 +1320,7 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
     // into mem_.
     {
       mutex_.Unlock();
-      // zhou: append to WAL
+      // zhou: append to WAL file
       status = log_->AddRecord(WriteBatchInternal::Contents(write_batch));
       bool sync_error = false;
 
@@ -1322,13 +1332,15 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
         }
       }
 
-      // zhou: write to log success, write to memtable "mem_".
+      // zhou: when write to log success/completed, write to memtable "mem_".
       if (status.ok()) {
         status = WriteBatchInternal::InsertInto(write_batch, mem_);
       }
 
       mutex_.Lock();
       if (sync_error) {
+        // zhou: README, how to handle OS error.
+
         // The state of the log file is indeterminate: the log record we
         // just added may or may not show up when the DB is re-opened.
         // So we force the DB into a mode where all future writes fail.
@@ -1336,16 +1348,22 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
       }
     }
 
+    // zhou: "tmp_batch_" used, so release it.
     if (write_batch == tmp_batch_) tmp_batch_->Clear();
 
     // zhou:
     versions_->SetLastSequence(last_sequence);
   }
 
+
   // zhou: maybe handled by other thread
   while (true) {
     Writer* ready = writers_.front();
     writers_.pop_front();
+
+    // zhou: due to some threads may get signal but found conditon still wrong,
+    //       go to block again. So, MUST signal here each time, otherwise some
+    //       threads may be blocked!!!
     if (ready != &w) {
       ready->status = status;
       ready->done = true;
@@ -1362,8 +1380,7 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
   return status;
 }
 
-// zhou: README,
-
+// zhou: collect several write batch in to one write batch according quota.
 // REQUIRES: Writer list must be non-empty
 // REQUIRES: First writer must have a non-null batch
 WriteBatch* DBImpl::BuildBatchGroup(Writer** last_writer) {
@@ -1374,6 +1391,9 @@ WriteBatch* DBImpl::BuildBatchGroup(Writer** last_writer) {
   assert(result != nullptr);
 
   size_t size = WriteBatchInternal::ByteSize(first->batch);
+
+  // zhou: caculate how much write task batch quota in bytes.
+  //       Want as much as possible, but not take current thread too much CPU time.
 
   // Allow the group to grow up to a maximum size, but if the
   // original write is small, limit the growth so we do not slow
@@ -1386,13 +1406,16 @@ WriteBatch* DBImpl::BuildBatchGroup(Writer** last_writer) {
   *last_writer = first;
   std::deque<Writer*>::iterator iter = writers_.begin();
   ++iter;  // Advance past "first"
+
   for (; iter != writers_.end(); ++iter) {
     Writer* w = *iter;
+    // zhou: keep all write task in batch are sync or async.
     if (w->sync && !first->sync) {
       // Do not include a sync write into a batch handled by a non-sync write.
       break;
     }
 
+    // zhou: compare with quota
     if (w->batch != nullptr) {
       size += WriteBatchInternal::ByteSize(w->batch);
       if (size > max_size) {
@@ -1400,13 +1423,20 @@ WriteBatch* DBImpl::BuildBatchGroup(Writer** last_writer) {
         break;
       }
 
+      // zhou: once there is more than 1 write task in batch, we use "tmp_batch_"
+      //       to collect write task.
       // Append to *result
       if (result == first->batch) {
         // Switch to temporary batch instead of disturbing caller's batch
         result = tmp_batch_;
         assert(WriteBatchInternal::Count(result) == 0);
+        // zhou: merge "first" write task to write batch "tmp_batch_"
+        //       Count within write batch updated when merge.
+        //       A copy perform here.
         WriteBatchInternal::Append(result, first->batch);
       }
+
+      // zhou: merge 2th/3th/... write task to write batch "tmp_batch_"
       WriteBatchInternal::Append(result, w->batch);
     }
     *last_writer = w;
@@ -1416,7 +1446,7 @@ WriteBatch* DBImpl::BuildBatchGroup(Writer** last_writer) {
 
 // zhou: check so many precondtions, may block due to IO throttling.
 //       Trigger minor compaction if need.
-//       "force", compact even if there is room?
+//       "force", compact by user even if there is room.
 
 // REQUIRES: mutex_ is held
 // REQUIRES: this thread is currently at the front of the writer queue

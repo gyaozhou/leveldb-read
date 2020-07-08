@@ -91,6 +91,7 @@ SequenceNumber WriteBatchInternal::Sequence(const WriteBatch* b) {
   return SequenceNumber(DecodeFixed64(b->rep_.data()));
 }
 
+// zhou: static function, set sequence for this write batch
 void WriteBatchInternal::SetSequence(WriteBatch* b, SequenceNumber seq) {
   EncodeFixed64(&b->rep_[0], seq);
 }
@@ -154,6 +155,7 @@ void WriteBatchInternal::SetContents(WriteBatch* b, const Slice& contents) {
   b->rep_.assign(contents.data(), contents.size());
 }
 
+// zhou: set count when write batch merged.
 void WriteBatchInternal::Append(WriteBatch* dst, const WriteBatch* src) {
   SetCount(dst, Count(dst) + Count(src));
   assert(src->rep_.size() >= kHeader);

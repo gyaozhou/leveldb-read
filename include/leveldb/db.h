@@ -60,11 +60,15 @@ class LEVELDB_EXPORT DB {
 
   virtual ~DB();
 
+  // zhou: Put() to insert a pair Key-Value. A special case of Write().
+
   // Set the database entry for "key" to "value".  Returns OK on success,
   // and a non-OK status on error.
   // Note: consider setting options.sync = true.
   virtual Status Put(const WriteOptions& options, const Slice& key,
                      const Slice& value) = 0;
+
+  // zhou: Delete() is a special case of Put(), write a op "kTypeDeletion".
 
   // Remove the database entry (if any) for "key".  Returns OK on
   // success, and a non-OK status on error.  It is not an error if "key"
@@ -72,7 +76,7 @@ class LEVELDB_EXPORT DB {
   // Note: consider setting options.sync = true.
   virtual Status Delete(const WriteOptions& options, const Slice& key) = 0;
 
-  // zhou: client could collect updates in "WriteBatch", and submit in batch.
+  // zhou: Write() to insert a batch of Key-Value, "WriteBatch".
 
   // Apply the specified updates to the database.
   // Returns OK on success, non-OK on failure.
