@@ -38,6 +38,7 @@ void VersionEdit::Clear() {
   new_files_.clear();
 }
 
+// zhou:
 void VersionEdit::EncodeTo(std::string* dst) const {
   if (has_comparator_) {
     PutVarint32(dst, kComparator);
@@ -102,7 +103,7 @@ static bool GetLevel(Slice* input, int* level) {
   }
 }
 
-// zhou: README,
+// zhou: decode record from file MANIFEST, each record is a VersionEdit.
 Status VersionEdit::DecodeFrom(const Slice& src) {
   Clear();
   Slice input = src;
@@ -161,6 +162,7 @@ Status VersionEdit::DecodeFrom(const Slice& src) {
 
       case kCompactPointer:
         if (GetLevel(&input, &level) && GetInternalKey(&input, &key)) {
+          // zhou: start key in next compaction
           compact_pointers_.push_back(std::make_pair(level, key));
         } else {
           msg = "compaction pointer";
@@ -169,6 +171,7 @@ Status VersionEdit::DecodeFrom(const Slice& src) {
 
       case kDeletedFile:
         if (GetLevel(&input, &level) && GetVarint64(&input, &number)) {
+          // zhou: deleted files, SST level, file number
           deleted_files_.insert(std::make_pair(level, number));
         } else {
           msg = "deleted file";
@@ -180,6 +183,7 @@ Status VersionEdit::DecodeFrom(const Slice& src) {
             GetVarint64(&input, &f.file_size) &&
             GetInternalKey(&input, &f.smallest) &&
             GetInternalKey(&input, &f.largest)) {
+          // zhou: added files, SST level, key range and file number, size.
           new_files_.push_back(std::make_pair(level, f));
         } else {
           msg = "new-file entry";

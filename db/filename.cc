@@ -75,6 +75,8 @@ std::string OldInfoLogFileName(const std::string& dbname) {
 //    dbname/LOG.old
 //    dbname/MANIFEST-[0-9]+
 //    dbname/[0-9]+.(log|sst|ldb)
+
+// zhou:
 bool ParseFileName(const std::string& filename, uint64_t* number,
                    FileType* type) {
   Slice rest(filename);
@@ -120,6 +122,9 @@ bool ParseFileName(const std::string& filename, uint64_t* number,
   return true;
 }
 
+// zhou: update CURRENT file.
+//       Don't trunct CURRENT file and write new MANIFEST direclty.
+//       Create a tmp file and rename to CURRENT file which may more safe.
 Status SetCurrentFile(Env* env, const std::string& dbname,
                       uint64_t descriptor_number) {
   // Remove leading "dbname/" and add newline to manifest file name

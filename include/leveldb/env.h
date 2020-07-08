@@ -221,6 +221,8 @@ class LEVELDB_EXPORT Env {
   virtual void SleepForMicroseconds(int micros) = 0;
 }; // zhou: end of "Env"
 
+// zhou: SequentialFile own different interface comparing to RandomAccessFile.
+
 // A file abstraction for reading sequentially through a file
 class LEVELDB_EXPORT SequentialFile {
  public:

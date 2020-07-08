@@ -89,15 +89,19 @@ class Reader {
   SequentialFile* const file_;
   Reporter* const reporter_;
   bool const checksum_;
+
+  // zhou: buffer for reading, "new char[kBlockSize]". "Slice buffer" will refer it.
   char* const backing_store_;
   Slice buffer_;
+
+  // zhou: already met end of file.
   bool eof_;  // Last Read() indicated EOF by returning < kBlockSize
 
-  // zhou: offset for read
+  // zhou: last read record offset.
   // Offset of the last record returned by ReadRecord.
   uint64_t last_record_offset_;
 
-  // zhou: ???
+  // zhou: the end offset of file have been read into buffer_.
   // Offset of the first location past the end of buffer_.
   uint64_t end_of_buffer_offset_;
 

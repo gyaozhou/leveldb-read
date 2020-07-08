@@ -297,7 +297,8 @@ void DBImpl::RemoveObsoleteFiles() {
   mutex_.Lock();
 }
 
-// zhou: README, recover db from files if exists.
+// zhou: recover db from files if exists, recover meta data from MANIFEST and
+//       replay WAL.
 Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   mutex_.AssertHeld();
 
@@ -311,16 +312,17 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
     return s;
   }
 
+  // zhou: firstly check file dbname/CURRENT
   if (!env_->FileExists(CurrentFileName(dbname_))) {
     if (options_.create_if_missing) {
-        // zhou: files broken, recreate DB anyway.
+      // zhou: CURRENT broken, recreate DB anyway.
       s = NewDB();
       if (!s.ok()) {
-          // zhou: create new DB completed.
+        // zhou: create new DB completed.
         return s;
       }
     } else {
-        // zhou: want re-open DB, but the files broken.
+      // zhou: just want re-open DB, but the files broken.
       return Status::InvalidArgument(
           dbname_, "does not exist (create_if_missing is false)");
     }
@@ -332,12 +334,16 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
     }
   }
 
-  // zhou: files looks good so far, try to re-open DB.
+  // zhou: try to recover Version according MANIFEST specified by CURRENT.
+  //       The Version is metadata to describe relations of many WAL, SST files.
   s = versions_->Recover(save_manifest);
   if (!s.ok()) {
     return s;
   }
   SequenceNumber max_sequence(0);
+
+  // zhou: although we don't use PrevLogNumber() any more, but we will recover
+  //       all newer WAL than the one named in MANIFEST.
 
   // Recover from all newer log files than the ones named in the
   // descriptor (new log files may have been added by the previous
@@ -350,22 +356,36 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   const uint64_t prev_log = versions_->PrevLogNumber();
   std::vector<std::string> filenames;
 
+  // zhou: get all files in filesystem
   s = env_->GetChildren(dbname_, &filenames);
   if (!s.ok()) {
     return s;
   }
+
+  // zhou: get live files used by some verion.
   std::set<uint64_t> expected;
   versions_->AddLiveFiles(&expected);
+
   uint64_t number;
   FileType type;
+  // zhou: collect WAL files, due to MANIFEST may no preserve all WAL due to
+  //       PrevLogNumber() no longer used. Should no more than two WAL files?
   std::vector<uint64_t> logs;
+
   for (size_t i = 0; i < filenames.size(); i++) {
     if (ParseFileName(filenames[i], &number, &type)) {
       expected.erase(number);
+
+      // zhou: special handle WAL, collect it to "logs"
       if (type == kLogFile && ((number >= min_log) || (number == prev_log)))
         logs.push_back(number);
     }
   }
+
+  // zhou: why not clean up file never existed in MANIFEST from filesystem.
+  //       Will be performed in RemoveObsoleteFiles().
+
+  // zhou: by this way detach all SST file missing, but can't detech WAL missing.
   if (!expected.empty()) {
     char buf[50];
     std::snprintf(buf, sizeof(buf), "%d missing files; e.g.",
@@ -373,15 +393,21 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
     return Status::Corruption(buf, TableFileName(dbname_, *(expected.begin())));
   }
 
+  // zhou: looks there could be more than two WAL files.
+  //       Sort WAL from oldest to latest.
   // Recover in the order in which the logs were generated
   std::sort(logs.begin(), logs.end());
   for (size_t i = 0; i < logs.size(); i++) {
-      // zhou:
+    // zhou: relay WAL
     s = RecoverLogFile(logs[i], (i == logs.size() - 1), save_manifest, edit,
                        &max_sequence);
     if (!s.ok()) {
       return s;
     }
+
+    // zhou: when before crash, WAL generated but the log number may not
+    //       preserved in MANIFEST, we should check and update the
+    //       "next_file_number_".
 
     // The previous incarnation may not have written any MANIFEST
     // records after allocating this log number.  So we manually
@@ -389,6 +415,9 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
     versions_->MarkFileNumberUsed(logs[i]);
   }
 
+  // zhou: verion recovered from MANIFEST will no preserve latest sequence,
+  //       since we can't update MANIFEST for each time sequence increased.
+  //       But WAL should includes all the sequence changes.
   if (versions_->LastSequence() < max_sequence) {
     versions_->SetLastSequence(max_sequence);
   }
@@ -396,7 +425,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   return Status::OK();
 }
 
-// zhou: README,
+// zhou: replay WAL to rebuld in memory data or destage to level 0 SST.
 Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
                               bool* save_manifest, VersionEdit* edit,
                               SequenceNumber* max_sequence) {
@@ -425,12 +454,14 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
     return status;
   }
 
+  // zhou: corrupt reporter
   // Create the log reader.
   LogReporter reporter;
   reporter.env = env_;
   reporter.info_log = options_.info_log;
   reporter.fname = fname.c_str();
   reporter.status = (options_.paranoid_checks ? &status : nullptr);
+
   // We intentionally make log::Reader do checksumming even if
   // paranoid_checks==false so that corruptions cause entire commits
   // to be skipped instead of propagating bad information (like overly
@@ -445,6 +476,8 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
   WriteBatch batch;
   int compactions = 0;
   MemTable* mem = nullptr;
+
+  // zhou: replay WAL to memory temorary then destaged to Level-0 SST.
   while (reader.ReadRecord(&record, &scratch) && status.ok()) {
     if (record.size() < 12) {
       reporter.Corruption(record.size(),
@@ -462,12 +495,15 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
     if (!status.ok()) {
       break;
     }
+
+    // zhou: update latest sequence when replay WAL.
     const SequenceNumber last_seq = WriteBatchInternal::Sequence(&batch) +
                                     WriteBatchInternal::Count(&batch) - 1;
     if (last_seq > *max_sequence) {
       *max_sequence = last_seq;
     }
 
+    // zhou: destage to level-0 SST
     if (mem->ApproximateMemoryUsage() > options_.write_buffer_size) {
       compactions++;
       *save_manifest = true;
@@ -480,15 +516,19 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
         break;
       }
     }
-  }
 
+  } // zhou: while
+
+  // zhou: not delete this WAL file, just delete this SequentialFile object.
   delete file;
 
+  // zhou: reuse last WAL log if it is can hold more data.
   // See if we should keep reusing the last log file.
   if (status.ok() && options_.reuse_logs && last_log && compactions == 0) {
     assert(logfile_ == nullptr);
     assert(log_ == nullptr);
     assert(mem_ == nullptr);
+
     uint64_t lfile_size;
     if (env_->GetFileSize(fname, &lfile_size).ok() &&
         env_->NewAppendableFile(fname, &logfile_).ok()) {
@@ -506,9 +546,11 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
     }
   }
 
+  // zhou: log is not reused, coresponding mem should be commpated.
   if (mem != nullptr) {
     // mem did not get reused; compact it.
     if (status.ok()) {
+      // zhou: should update MANIFEST
       *save_manifest = true;
       status = WriteLevel0Table(mem, edit, nullptr);
     }
@@ -1600,6 +1642,7 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   DBImpl* impl = new DBImpl(options, dbname);
 
   impl->mutex_.Lock();
+  // zhou: VersionEdit collect metadata changes.
   VersionEdit edit;
   // Recover handles create_if_missing, error_if_exists
   bool save_manifest = false;
@@ -1625,16 +1668,20 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
     }
   }
 
-  // zhou:
+  // zhou: need to save a new MANIFEST file.
   if (s.ok() && save_manifest) {
+    // zhou: WAL already replayed
     edit.SetPrevLogNumber(0);  // No older logs needed after recovery.
     edit.SetLogNumber(impl->logfile_number_);
 
+    // zhou: persist metadata to MANIFEST
     s = impl->versions_->LogAndApply(&edit, &impl->mutex_);
   }
 
   if (s.ok()) {
+    // zhou: remove obsolet files from filesystem
     impl->RemoveObsoleteFiles();
+    // zhou: schedule compaction
     impl->MaybeScheduleCompaction();
   }
   impl->mutex_.Unlock();

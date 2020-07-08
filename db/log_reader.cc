@@ -30,10 +30,14 @@ Reader::Reader(SequentialFile* file, Reporter* reporter, bool checksum,
 
 Reader::~Reader() { delete[] backing_store_; }
 
-// zhou: once "initial_offset_" > 0, skip several blocks.
-//       kBlockSize == 8*4KB, only skip multiply blocks
+// zhou: Due to log reader will read log file block by block, so here just skip
+//       multiply blocks fully covered by "initial_offset_".
+//       For initial_offset_ leftover part, ReadPhysicalRecord() will handle it by
+//       return "kBadRecord".
+//       once "initial_offset_" > 0, skip several blocks, kBlockSize == 32KB.
 bool Reader::SkipToInitialBlock() {
   const size_t offset_in_block = initial_offset_ % kBlockSize;
+  // zhou: block size is fixed 32KB, here get the multiply blocks (in bytes) need to skip.
   uint64_t block_start_location = initial_offset_ - offset_in_block;
 
   // zhou: refer to doc/log_format.md, the log is consist with sequential 32KB
@@ -41,6 +45,8 @@ bool Reader::SkipToInitialBlock() {
   //       "A record never starts within the last six bytes of a block (since it won't fit)."
   // Don't search a block if we'd be in the trailer
   if (offset_in_block > kBlockSize - 6) {
+      // zhou: there will be no valid record within tailer (6 byts), so skip
+      //       one more block.
     block_start_location += kBlockSize;
   }
 
@@ -59,9 +65,12 @@ bool Reader::SkipToInitialBlock() {
   return true;
 }
 
-// zhou: README,
+// zhou: "record" used to get logical record.
+//       "scratch" used to collect fragments to generate a full logical record.
 bool Reader::ReadRecord(Slice* record, std::string* scratch) {
   if (last_record_offset_ < initial_offset_) {
+      // zhou: skip all blocks will not contains usable records.
+      //       But still possible contains "initial_offset_"
     if (!SkipToInitialBlock()) {
       return false;
     }
@@ -71,6 +80,9 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
   record->clear();
 
   bool in_fragmented_record = false;
+
+  // zhou: preserv when logical record spread seveal physical record.
+
   // Record offset of the logical record that we're reading
   // 0 is a dummy value to make compilers happy
   uint64_t prospective_record_offset = 0;
@@ -86,6 +98,7 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
     uint64_t physical_record_offset =
         end_of_buffer_offset_ - buffer_.size() - kHeaderSize - fragment.size();
 
+    // zhou: when the skip may happen? we already skipped initial_offset_.
     if (resyncing_) {
       if (record_type == kMiddleType) {
         continue;
@@ -110,6 +123,7 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
         }
         prospective_record_offset = physical_record_offset;
         scratch->clear();
+
         *record = fragment;
         last_record_offset_ = prospective_record_offset;
         return true;
@@ -124,6 +138,7 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
             ReportCorruption(scratch->size(), "partial record without end(2)");
           }
         }
+
         prospective_record_offset = physical_record_offset;
         scratch->assign(fragment.data(), fragment.size());
         in_fragmented_record = true;
@@ -151,6 +166,9 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
         break;
 
       case kEof:
+        // zhou: still expect leftover of fragment record, but file ended.
+        //       It is not fault, it is abnormal which WAL designed to handle.
+        //       Just ignore the entire logical record.
         if (in_fragmented_record) {
           // This can be caused by the writer dying immediately after
           // writing a physical record but before completing the next; don't
@@ -160,6 +178,7 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
         return false;
 
       case kBadRecord:
+        // zhou: do nothing to handle broken logical record??? data loss!!!
         if (in_fragmented_record) {
           ReportCorruption(scratch->size(), "error in middle of record");
           in_fragmented_record = false;
@@ -188,6 +207,7 @@ void Reader::ReportCorruption(uint64_t bytes, const char* reason) {
   ReportDrop(bytes, Status::Corruption(reason));
 }
 
+// zhou: data loss !!!
 void Reader::ReportDrop(uint64_t bytes, const Status& reason) {
   if (reporter_ != nullptr &&
       end_of_buffer_offset_ - buffer_.size() - bytes >= initial_offset_) {
@@ -195,14 +215,27 @@ void Reader::ReportDrop(uint64_t bytes, const Status& reason) {
   }
 }
 
+// zhou: will return a record for each time. Once one block already parsed completed,
+//       read next block into buffer_, and parse it again.
+//       The record returned, is physical record, may not be a logical recored which
+//       may spread several physical record.
 unsigned int Reader::ReadPhysicalRecord(Slice* result) {
   while (true) {
+    // zhou: the left space is not enough hold a record. We can read next block.
     if (buffer_.size() < kHeaderSize) {
-      if (!eof_) {
+
+        // zhou: have not meet end of file.
+        if (!eof_) {
+
+        // zhou: skip leftover in "buffer_".
         // Last read was a full read, so this is a trailer to skip
         buffer_.clear();
+
+        // zhou: always read a full block from log.
         Status status = file_->Read(kBlockSize, &buffer_, backing_store_);
+
         end_of_buffer_offset_ += buffer_.size();
+
         if (!status.ok()) {
           buffer_.clear();
           ReportDrop(kBlockSize, status);
@@ -211,7 +244,10 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
         } else if (buffer_.size() < kBlockSize) {
           eof_ = true;
         }
+
+        // zhou: normal path. Go back to check again the buffer_ size is big enough.
         continue;
+
       } else {
         // Note that if buffer_ is non-empty, we have a truncated header at the
         // end of the file, which can be caused by the writer crashing in the
@@ -220,12 +256,16 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
         buffer_.clear();
         return kEof;
       }
+
     }
+
+    // zhou: start to parse "buffer_"
 
     // Parse the header
     const char* header = buffer_.data();
     const uint32_t a = static_cast<uint32_t>(header[4]) & 0xff;
     const uint32_t b = static_cast<uint32_t>(header[5]) & 0xff;
+    // zhou: return value
     const unsigned int type = header[6];
     const uint32_t length = a | (b << 8);
     if (kHeaderSize + length > buffer_.size()) {
@@ -241,11 +281,14 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
       return kEof;
     }
 
+    // zhou: due to mmap(), sparse file will generated due to preallocated, But
+    //       the hole only happened in the tail of block?
     if (type == kZeroType && length == 0) {
       // Skip zero length record without reporting any drops since
       // such records are produced by the mmap based writing code in
       // env_posix.cc that preallocates file regions.
       buffer_.clear();
+      // zhou: it's not broken record, just invalid record.
       return kBadRecord;
     }
 
@@ -265,8 +308,10 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
       }
     }
 
+    // zhou: skip this record, because it will be returned in "*result".
     buffer_.remove_prefix(kHeaderSize + length);
 
+    // zhou: this record is still belongs to "initial_offset_".
     // Skip physical record that started before initial_offset_
     if (end_of_buffer_offset_ - buffer_.size() - kHeaderSize - length <
         initial_offset_) {
@@ -274,9 +319,10 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
       return kBadRecord;
     }
 
+    // zhou: the physical record.
     *result = Slice(header + kHeaderSize, length);
     return type;
-  }
+  } // zhou: while (true)
 }
 
 }  // namespace log

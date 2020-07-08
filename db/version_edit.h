@@ -15,10 +15,12 @@ namespace leveldb {
 
 class VersionSet;
 
+// zhou: used to describe a SST file.
 struct FileMetaData {
   FileMetaData() : refs(0), allowed_seeks(1 << 30), file_size(0) {}
 
   int refs;
+  // zhou: how many times seek will trigger compaction
   int allowed_seeks;  // Seeks allowed until compaction
   uint64_t number;
   uint64_t file_size;    // File size in bytes
@@ -83,7 +85,7 @@ class VersionEdit {
 
  private:
   friend class VersionSet;
-
+  // zhou: <SST level, file number>
   typedef std::set<std::pair<int, uint64_t>> DeletedFileSet;
 
   std::string comparator_;
@@ -91,16 +93,24 @@ class VersionEdit {
   uint64_t prev_log_number_;
   uint64_t next_file_number_;
   SequenceNumber last_sequence_;
+
   bool has_comparator_;
   bool has_log_number_;
   bool has_prev_log_number_;
   bool has_next_file_number_;
   bool has_last_sequence_;
 
+  // zhou: [<SST level, internel key>, ...], the key should be scheduled to
+  //       compact in next time.
+  //       The compaction for each SST level will be splited into several times.
+  //       So, the start point key should be remembered for next compaction.
   std::vector<std::pair<int, InternalKey>> compact_pointers_;
+  // zhou: deleted files
   DeletedFileSet deleted_files_;
+  // zhou: added files
   std::vector<std::pair<int, FileMetaData>> new_files_;
-};
+
+}; // zhou: "class VersionEdit"
 
 }  // namespace leveldb
 

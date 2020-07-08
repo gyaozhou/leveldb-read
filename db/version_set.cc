@@ -38,6 +38,7 @@ static int64_t ExpandedCompactionByteSizeLimit(const Options* options) {
   return 25 * TargetFileSize(options);
 }
 
+// zhou: get a bench mark for each level's files' size.
 static double MaxBytesForLevel(const Options* options, int level) {
   // Note: the result for level zero is not really used since we set
   // the level-0 compaction threshold based on number of files.
@@ -565,7 +566,7 @@ std::string Version::DebugString() const {
   return r;
 }
 
-// zhou: private class defined in class Version.
+// zhou: nested class definition.
 
 // A helper class so we can efficiently apply a whole sequence
 // of edits to a particular state without creating intermediate
@@ -576,6 +577,7 @@ class VersionSet::Builder {
   struct BySmallestKey {
     const InternalKeyComparator* internal_comparator;
 
+    // zhou: return true if f1.smallest < f2.smallest
     bool operator()(FileMetaData* f1, FileMetaData* f2) const {
       int r = internal_comparator->Compare(f1->smallest, f2->smallest);
       if (r != 0) {
@@ -585,9 +587,10 @@ class VersionSet::Builder {
         return (f1->number < f2->number);
       }
     }
-  };
+  }; // zhou: "struct BySmallestKey"
 
   typedef std::set<FileMetaData*, BySmallestKey> FileSet;
+
   struct LevelState {
     std::set<uint64_t> deleted_files;
     FileSet* added_files;
@@ -604,6 +607,7 @@ class VersionSet::Builder {
     BySmallestKey cmp;
     cmp.internal_comparator = &vset_->icmp_;
     for (int level = 0; level < config::kNumLevels; level++) {
+        // zhou: each level owns a added files set and a deleted files set.
       levels_[level].added_files = new FileSet(cmp);
     }
   }
@@ -629,9 +633,11 @@ class VersionSet::Builder {
     base_->Unref();
   }
 
-  // zhou:
+  // zhou: just collect all VersionEdit
   // Apply all of the edits in *edit to the current state.
   void Apply(VersionEdit* edit) {
+    // zhou: overwrite directly for each level's compact key.
+    //       No need complicated processing.
     // Update compaction pointers
     for (size_t i = 0; i < edit->compact_pointers_.size(); i++) {
       const int level = edit->compact_pointers_[i].first;
@@ -668,12 +674,13 @@ class VersionSet::Builder {
       f->allowed_seeks = static_cast<int>((f->file_size / 16384U));
       if (f->allowed_seeks < 100) f->allowed_seeks = 100;
 
+      // zhou: README, why the file number exist both in deleted and added list???
       levels_[level].deleted_files.erase(f->number);
       levels_[level].added_files->insert(f);
     }
   }
 
-  // zhou: README,
+  // zhou: add files to Version in increase ordered by internal key.
   // Save the current state in *v.
   void SaveTo(Version* v) {
     BySmallestKey cmp;
@@ -685,12 +692,19 @@ class VersionSet::Builder {
       std::vector<FileMetaData*>::const_iterator base_iter = base_files.begin();
       std::vector<FileMetaData*>::const_iterator base_end = base_files.end();
       const FileSet* added_files = levels_[level].added_files;
+
+      // zhou: reserve capacity to improve performance
       v->files_[level].reserve(base_files.size() + added_files->size());
+
+      // zhou: by this way, to invoke MaybeAddFile() in internal key increase order.
       for (const auto& added_file : *added_files) {
+
+        // zhou: README, ???
         // Add all smaller files listed in base_
         for (std::vector<FileMetaData*>::const_iterator bpos =
                  std::upper_bound(base_iter, base_end, added_file, cmp);
              base_iter != bpos; ++base_iter) {
+
           MaybeAddFile(v, level, *base_iter);
         }
 
@@ -720,21 +734,29 @@ class VersionSet::Builder {
     }
   }
 
+  // zhou: add file to Version which exist in latest version.
   void MaybeAddFile(Version* v, int level, FileMetaData* f) {
+    // zhou: count() is better comparing find(), in case of just check exist or not.
+    //       Not add file which already deleted.
     if (levels_[level].deleted_files.count(f->number) > 0) {
       // File is deleted: do nothing
     } else {
       std::vector<FileMetaData*>* files = &v->files_[level];
+      // zhou: make sure the key range will not overlap with other files of each
+      //       level.
       if (level > 0 && !files->empty()) {
+        // zhou: "files_" is increase ordered by internal key.
+        //       So existing largest key should smaller than new added smallest key.
         // Must not overlap
         assert(vset_->icmp_.Compare((*files)[files->size() - 1]->largest,
                                     f->smallest) < 0);
       }
       f->refs++;
+      // zhou: only final/latest SST file will be added.
       files->push_back(f);
     }
   }
-}; // zhou: end of "class VersionSet:Builder"
+}; // zhou: "class VersionSet:Builder"
 
 VersionSet::VersionSet(const std::string& dbname, const Options* options,
                        TableCache* table_cache,
@@ -763,7 +785,7 @@ VersionSet::~VersionSet() {
   delete descriptor_file_;
 }
 
-// zhou: README,
+// zhou: link Version to VersionSet's double list, make "v" as CURRENT.
 void VersionSet::AppendVersion(Version* v) {
   // Make "v" current
   assert(v->refs_ == 0);
@@ -783,6 +805,7 @@ void VersionSet::AppendVersion(Version* v) {
   v->next_->prev_ = v;
 }
 
+// zhou: README, persist metadata to MANIFEST after compaction.
 Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
   if (edit->has_log_number_) {
     assert(edit->log_number_ >= log_number_);
@@ -801,9 +824,12 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
   Version* v = new Version(this);
   {
     Builder builder(this, current_);
+    // zhou: apply edit to get a new Version.
     builder.Apply(edit);
     builder.SaveTo(v);
   }
+
+  // zhou: precompute which level need compaction.
   Finalize(v);
 
   // Initialize new descriptor log file if necessary by creating
@@ -814,6 +840,8 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
     // No reason to unlock *mu here since we only hit this path in the
     // first call to LogAndApply (when opening the database).
     assert(descriptor_file_ == nullptr);
+
+    // zhou: prepare new MANIFEST handler
     new_manifest_file = DescriptorFileName(dbname_, manifest_file_number_);
     edit->SetNextFile(next_file_number_);
     s = env_->NewWritableFile(new_manifest_file, &descriptor_file_);
@@ -831,8 +859,10 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
     if (s.ok()) {
       std::string record;
       edit->EncodeTo(&record);
+      // zhou: append a new record to MANIFEST
       s = descriptor_log_->AddRecord(record);
       if (s.ok()) {
+        // zhou: metadata must updated in sync way!!!
         s = descriptor_file_->Sync();
       }
       if (!s.ok()) {
@@ -843,6 +873,7 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
     // If we just created a new descriptor file, install it by writing a
     // new CURRENT file that points to it.
     if (s.ok() && !new_manifest_file.empty()) {
+      // zhou: new CURRENT file.
       s = SetCurrentFile(env_, dbname_, manifest_file_number_);
     }
 
@@ -855,6 +886,8 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
     log_number_ = edit->log_number_;
     prev_log_number_ = edit->prev_log_number_;
   } else {
+    // zhou: how to continue processing.
+
     delete v;
     if (!new_manifest_file.empty()) {
       delete descriptor_log_;
@@ -868,7 +901,7 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
   return s;
 }
 
-// zhou: README, recover from MANIFEST.xxxxxx which indicated by file CURRENT.
+// zhou: recover from MANIFEST.xxxxxx which indicated by file CURRENT.
 Status VersionSet::Recover(bool* save_manifest) {
 
   // zhou: define concrete class to handle "Corruption" when read file.
@@ -912,8 +945,11 @@ Status VersionSet::Recover(bool* save_manifest) {
   uint64_t last_sequence = 0;
   uint64_t log_number = 0;
   uint64_t prev_log_number = 0;
+
+  // zhou:
   Builder builder(this, current_);
 
+  // zhou: replay all records (VersionEdit) in loop.
   {
     LogReporter reporter;
     reporter.status = &s;
@@ -925,9 +961,11 @@ Status VersionSet::Recover(bool* save_manifest) {
     Slice record;
     std::string scratch;
     while (reader.ReadRecord(&record, &scratch) && s.ok()) {
+
       VersionEdit edit;
       s = edit.DecodeFrom(record);
       if (s.ok()) {
+          // zhou: current software doesn't compatible with file.
         if (edit.has_comparator_ &&
             edit.comparator_ != icmp_.user_comparator()->Name()) {
           s = Status::InvalidArgument(
@@ -937,8 +975,12 @@ Status VersionSet::Recover(bool* save_manifest) {
       }
 
       if (s.ok()) {
+        // zhou: collect VersionEdit one by one
         builder.Apply(&edit);
       }
+
+      // zhou: VersionEdit will not record everything below, just the things
+      //       changed.
 
       if (edit.has_log_number_) {
         log_number = edit.log_number_;
@@ -963,10 +1005,14 @@ Status VersionSet::Recover(bool* save_manifest) {
 
   }
 
+  // zhou: close MANIFEST file
   delete file;
   file = nullptr;
 
+  // zhou: check result, make sure all important variable are fetched from MANIFEST.
+  //
   if (s.ok()) {
+    // zhou: these 3 variables MUST exist
     if (!have_next_file) {
       s = Status::Corruption("no meta-nextfile entry in descriptor");
     } else if (!have_log_number) {
@@ -975,6 +1021,7 @@ Status VersionSet::Recover(bool* save_manifest) {
       s = Status::Corruption("no last-sequence-number entry in descriptor");
     }
 
+    // zhou: assume last WAL has been destaged
     if (!have_prev_log_number) {
       prev_log_number = 0;
     }
@@ -985,15 +1032,20 @@ Status VersionSet::Recover(bool* save_manifest) {
   }
 
   if (s.ok()) {
-      // zhou: save to version
     Version* v = new Version(this);
+    // zhou: merge VersionEdit collected in Apply(), and save to Version "v".
+    //       Builder work completed.
     builder.SaveTo(v);
 
+    // zhou: precompute which level need compaction.
     // Install recovered version
     Finalize(v);
 
     AppendVersion(v);
 
+    // zhou: will generate new MANIFEST file immeidately after recovered.
+    //       So the next file number assigned to it.
+    //       Once MANIFEST file is worth to reuse, this file number will be wasted.
     manifest_file_number_ = next_file;
     next_file_number_ = next_file + 1;
     last_sequence_ = last_sequence;
@@ -1012,7 +1064,10 @@ Status VersionSet::Recover(bool* save_manifest) {
   return s;
 }
 
-// zhou: README,
+// zhou: MANIFEST file is similar with WAL, we should manage the file size.
+//       Once its size is too big, create a new MANIFEST file. Otherwise, reuse
+//       current one.
+//       "dscname", with absolute file path; "dscbase", MANIFEST.xxxxx
 bool VersionSet::ReuseManifest(const std::string& dscname,
                                const std::string& dscbase) {
   if (!options_->reuse_logs) {
@@ -1035,7 +1090,7 @@ bool VersionSet::ReuseManifest(const std::string& dscname,
   assert(descriptor_file_ == nullptr);
   assert(descriptor_log_ == nullptr);
 
-  // zhou: could reuse this MANIFEST file, could append it.
+  // zhou: try to create object to reuse this MANIFEST file.
   Status r = env_->NewAppendableFile(dscname, &descriptor_file_);
   if (!r.ok()) {
     Log(options_->info_log, "Reuse MANIFEST: %s\n", r.ToString().c_str());
@@ -1043,6 +1098,7 @@ bool VersionSet::ReuseManifest(const std::string& dscname,
     return false;
   }
 
+  // zhou: create object "log::Writer"
   Log(options_->info_log, "Reusing MANIFEST %s\n", dscname.c_str());
   descriptor_log_ = new log::Writer(descriptor_file_, manifest_size);
   manifest_file_number_ = manifest_number;
@@ -1056,7 +1112,7 @@ void VersionSet::MarkFileNumberUsed(uint64_t number) {
   }
 }
 
-// zhou: README,
+// zhou: caculate which level need to compact in next time.
 void VersionSet::Finalize(Version* v) {
   // Precomputed best level for next compaction
   int best_level = -1;
@@ -1078,7 +1134,9 @@ void VersionSet::Finalize(Version* v) {
       // overwrites/deletions).
       score = v->files_[level].size() /
               static_cast<double>(config::kL0_CompactionTrigger);
+
     } else {
+
       // Compute the ratio of current size to size limit.
       const uint64_t level_bytes = TotalFileSize(v->files_[level]);
       score =
@@ -1091,10 +1149,13 @@ void VersionSet::Finalize(Version* v) {
     }
   }
 
+  // zhou: which level's files size is much greater than benchmark.
   v->compaction_level_ = best_level;
   v->compaction_score_ = best_score;
 }
 
+// zhou: full description of current Version, wrote as first record in new MANIFEST file.
+//       README,
 Status VersionSet::WriteSnapshot(log::Writer* log) {
   // TODO: Break up into multiple records to reduce memory usage on recovery?
 
@@ -1177,6 +1238,7 @@ uint64_t VersionSet::ApproximateOffsetOf(Version* v, const InternalKey& ikey) {
   return result;
 }
 
+// zhou: collect all files still used by all live version.
 void VersionSet::AddLiveFiles(std::set<uint64_t>* live) {
   for (Version* v = dummy_versions_.next_; v != &dummy_versions_;
        v = v->next_) {

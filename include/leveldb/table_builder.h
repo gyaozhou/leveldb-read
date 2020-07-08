@@ -25,6 +25,7 @@ class BlockBuilder;
 class BlockHandle;
 class WritableFile;
 
+// zhou: build SST
 class LEVELDB_EXPORT TableBuilder {
  public:
   // Create a builder that will store the contents of the table it is

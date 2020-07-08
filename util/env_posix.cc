@@ -102,7 +102,7 @@ class Limiter {
   std::atomic<int> acquires_allowed_;
 };
 
-// zhou: read file in sequential way
+// zhou: read file in sequential way, do NOT need to specify the offset for read.
 
 // Implements sequential read access in a file using read().
 //
@@ -144,7 +144,7 @@ class PosixSequentialFile final : public SequentialFile {
 };
 
 
-// zhou: read file in random way
+// zhou: read file in random way, have to specify the offset for each read.
 
 // Implements random read access in a file using pread().
 //
@@ -206,7 +206,11 @@ class PosixRandomAccessFile final : public RandomAccessFile {
   const int fd_;                 // -1 if has_permanent_fd_ is false.
   Limiter* const fd_limiter_;
   const std::string filename_;
-};
+}; // zhou: "class PosixRandomAccessFile"
+
+
+// zhou: once mmap() enabled, random access file via mmap way which should be
+//       own better performance (more flexible) in random read.
 
 // Implements random read access in a file using mmap().
 //
@@ -579,6 +583,7 @@ class PosixEnv : public Env {
     return ::access(filename.c_str(), F_OK) == 0;
   }
 
+  // zhou: get all files under this directory.
   Status GetChildren(const std::string& directory_path,
                      std::vector<std::string>* result) override {
     result->clear();

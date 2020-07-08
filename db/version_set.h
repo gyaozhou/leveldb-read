@@ -152,6 +152,7 @@ class Version {
   Version* prev_;     // Previous version in linked list
   int refs_;          // Number of live refs to this version
 
+  // zhou: increase ordered by internal key
   // List of files per level
   std::vector<FileMetaData*> files_[config::kNumLevels];
 
@@ -227,6 +228,7 @@ class VersionSet {
   // Return the current log file number.
   uint64_t LogNumber() const { return log_number_; }
 
+  // zhou: deprecated
   // Return the log file number for the log file that is currently
   // being compacted, or zero if there is no such log file.
   uint64_t PrevLogNumber() const { return prev_log_number_; }
@@ -274,6 +276,7 @@ class VersionSet {
   const char* LevelSummary(LevelSummaryStorage* scratch) const;
 
  private:
+  // zhou: nested class, declare here.
   class Builder;
 
   friend class Compaction;
@@ -301,19 +304,28 @@ class VersionSet {
   const std::string dbname_;
   const Options* const options_;
   TableCache* const table_cache_;
+
+  // zhou: function used to sort according key.
   const InternalKeyComparator icmp_;
 
+  // zhou: next .ldb/.log/MANIFEST file number
   uint64_t next_file_number_;
+  // zhou: current MANIFEST file number
   uint64_t manifest_file_number_;
+  // zhou: last operation sequence
   uint64_t last_sequence_;
+  // zhou: current WAL file number
   uint64_t log_number_;
+  // zhou: last WAL file number, keep it until "imm_" destaged to SST.
   uint64_t prev_log_number_;  // 0 or backing store for memtable being compacted
 
   // Opened lazily
+  // zhou: handle for open MANIFEST file
   WritableFile* descriptor_file_;
+  // zhou: handle for append record to MANIFEST file
   log::Writer* descriptor_log_;
 
-  // zhou: manage Version list
+  // zhou: manage Version list, only keep live Version.
   Version dummy_versions_;  // Head of circular doubly-linked list of versions.
   Version* current_;        // == dummy_versions_.prev_
 
@@ -321,7 +333,7 @@ class VersionSet {
   // Per-level key at which the next compaction at that level should start.
   // Either an empty string, or a valid InternalKey.
   std::string compact_pointer_[config::kNumLevels];
-}; // zhou: end of class VersionSet
+}; // zhou: class VersionSet
 
 
 
