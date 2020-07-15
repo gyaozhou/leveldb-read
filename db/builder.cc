@@ -14,6 +14,7 @@
 
 namespace leveldb {
 
+// zhou: README, loop write "iter" to SST.
 Status BuildTable(const std::string& dbname, Env* env, const Options& options,
                   TableCache* table_cache, Iterator* iter, FileMetaData* meta) {
   Status s;
@@ -30,6 +31,8 @@ Status BuildTable(const std::string& dbname, Env* env, const Options& options,
 
     TableBuilder* builder = new TableBuilder(options, file);
     meta->smallest.DecodeFrom(iter->key());
+
+    // zhou:
     for (; iter->Valid(); iter->Next()) {
       Slice key = iter->key();
       meta->largest.DecodeFrom(key);
@@ -44,6 +47,7 @@ Status BuildTable(const std::string& dbname, Env* env, const Options& options,
     }
     delete builder;
 
+    // zhou: have to sync, otherwise data may corrupted.
     // Finish and check for file errors
     if (s.ok()) {
       s = file->Sync();

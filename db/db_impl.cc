@@ -574,6 +574,7 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
   Status s;
   {
     mutex_.Unlock();
+    // zhou: write to level-0 SST
     s = BuildTable(dbname_, env_, options_, table_cache_, iter, &meta);
     mutex_.Lock();
   }
@@ -583,6 +584,8 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
       s.ToString().c_str());
   delete iter;
   pending_outputs_.erase(meta.number);
+
+  // zhou: update metadata.
 
   // Note that if file_size is zero, the file has been deleted and
   // should not be added to the manifest.
@@ -594,6 +597,7 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
         // zhou:
       level = base->PickLevelForMemTableOutput(min_user_key, max_user_key);
     }
+    // zhou: add to VersionEdit
     edit->AddFile(level, meta.number, meta.file_size, meta.smallest,
                   meta.largest);
   }
@@ -799,6 +803,7 @@ void DBImpl::BackgroundCompaction() {
   } else if (!is_manual && c->IsTrivialMove()) {
     // Move file to next level
     assert(c->num_input_files(0) == 1);
+
     FileMetaData* f = c->input(0, 0);
     c->edit()->RemoveFile(c->level(), f->number);
     c->edit()->AddFile(c->level() + 1, f->number, f->file_size, f->smallest,

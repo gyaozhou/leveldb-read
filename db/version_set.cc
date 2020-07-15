@@ -1543,10 +1543,12 @@ void VersionSet::SetupOtherInputs(Compaction* c) {
   c->edit_.SetCompactPointer(level, largest);
 }
 
+// zhou: README,
 Compaction* VersionSet::CompactRange(int level, const InternalKey* begin,
                                      const InternalKey* end) {
   std::vector<FileMetaData*> inputs;
   current_->GetOverlappingInputs(level, begin, end, &inputs);
+
   if (inputs.empty()) {
     return nullptr;
   }
@@ -1572,7 +1574,9 @@ Compaction* VersionSet::CompactRange(int level, const InternalKey* begin,
   c->input_version_ = current_;
   c->input_version_->Ref();
   c->inputs_[0] = inputs;
+
   SetupOtherInputs(c);
+
   return c;
 }
 
