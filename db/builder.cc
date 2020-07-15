@@ -33,10 +33,13 @@ Status BuildTable(const std::string& dbname, Env* env, const Options& options,
     meta->smallest.DecodeFrom(iter->key());
 
     // zhou:
+    Slice key;
     for (; iter->Valid(); iter->Next()) {
-      Slice key = iter->key();
-      meta->largest.DecodeFrom(key);
+      key = iter->key();
       builder->Add(key, iter->value());
+    }
+    if (!key.empty()) {
+      meta->largest.DecodeFrom(key);
     }
 
     // Finish and check for builder errors
