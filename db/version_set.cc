@@ -955,6 +955,7 @@ Status VersionSet::Recover(bool* save_manifest) {
 
   // zhou:
   Builder builder(this, current_);
+  int read_records = 0;
 
   // zhou: replay all records (VersionEdit) in loop.
   {
@@ -968,7 +969,7 @@ Status VersionSet::Recover(bool* save_manifest) {
     Slice record;
     std::string scratch;
     while (reader.ReadRecord(&record, &scratch) && s.ok()) {
-
+      ++read_records;
       VersionEdit edit;
       s = edit.DecodeFrom(record);
       if (s.ok()) {
@@ -1066,6 +1067,10 @@ Status VersionSet::Recover(bool* save_manifest) {
       // zhou: need to save new manifest
       *save_manifest = true;
     }
+  } else {
+    std::string error = s.ToString();
+    Log(options_->info_log, "Error recovering version set with %d records: %s",
+        read_records, error.c_str());
   }
 
   return s;

@@ -206,6 +206,9 @@ Status DBImpl::NewDB() {
     new_db.EncodeTo(&record);
     s = log.AddRecord(record);
     if (s.ok()) {
+      s = file->Sync();
+    }
+    if (s.ok()) {
       s = file->Close();
     }
   }
@@ -315,6 +318,8 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   if (!env_->FileExists(CurrentFileName(dbname_))) {
     if (options_.create_if_missing) {
       // zhou: CURRENT broken, recreate DB anyway.
+      Log(options_.info_log, "Creating DB %s since it was missing.",
+          dbname_.c_str());
       s = NewDB();
       if (!s.ok()) {
         // zhou: create new DB completed.
